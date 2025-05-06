@@ -12,3 +12,5 @@ def main(mytimer: func.TimerRequest) -> None:
     except Exception as e:
         logging.error(f'Error in data processing: {str(e)}')
         raise
+
+    # Änderung für GitHub Deployment-Test
