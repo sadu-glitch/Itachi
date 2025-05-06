@@ -1,16 +1,21 @@
 import logging
+
 import azure.functions as func
-from .. import msp_sap_integration_fixed
 
-def main(mytimer: func.TimerRequest) -> None:
-    logging.info('Python timer trigger function started')
-    
-    try:
-        # Run the data processing
-        msp_sap_integration_fixed.main()
-        logging.info('Data processing completed successfully')
-    except Exception as e:
-        logging.error(f'Error in data processing: {str(e)}')
-        raise
+def main(req: func.HttpRequest) -> func.HttpResponse:
+    logging.info("HTTP trigger received a request.")
+    name = req.params.get('name')
+    if not name:
+        try:
+            req_body = req.get_json()
+        except ValueError:
+            req_body = {}
+        name = req_body.get('name')
 
-    # Änderung für GitHub Deployment-Test
+    if name:
+        return func.HttpResponse(f"Hello, {name}!")
+    else:
+        return func.HttpResponse(
+            "Please pass a name in the query string or in the request body",
+            status_code=400
+        )
