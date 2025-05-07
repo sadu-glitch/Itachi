@@ -11,8 +11,8 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: '.' # set this to the path to your web app project, defaults to the repository root
-  PYTHON_VERSION: '3.12' # set this to the python version to use (supports 3.6, 3.7, 3.8)
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: './function-app'  # set to function-app directory
+  PYTHON_VERSION: '3.12'
 
 jobs:
   build:
@@ -34,13 +34,21 @@ jobs:
           python -m venv venv
           source venv/bin/activate
 
+      - name: Copy shared code into function app directory
+        run: |
+          mkdir -p ./function-app/shared
+          cp -r ./shared/* ./function-app/shared/
+          
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r ./function-app/requirements.txt
 
       # Optional: Add step to run tests here
 
       - name: Zip artifact for deployment
-        run: zip release.zip ./* -r
+        run: |
+          cd function-app
+          zip -r ../release.zip ./*
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
@@ -79,5 +87,4 @@ jobs:
         with:
           app-name: 'TestPythonMSP'
           slot-name: 'Production'
-          package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-          
+          package: '.'  # Deploy from current directory after unzipping
