@@ -12,7 +12,7 @@ on:
 
 env:
   AZURE_WEBAPP_NAME: msp-sap-api2  # Updated to your actual app nameee
-  PYTHON_VERSION: '3.9'
+  PYTHON_VERSION: '3.11'
 
 jobs:
   build-and-deploy:
