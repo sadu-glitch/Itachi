@@ -26,4 +26,4 @@ jobs:
           action: "upload"
           app_location: "frontend"  # Location of your frontend code
           api_location: ""  # Leave empty if you don't have an API
-          output_location: "build"  # Built app content directory
+          output_location: "build"  # Built app content directoryy
