@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_WEBAPP_NAME: msp-sap-api2  # Updated to your actual app namee
+  AZURE_WEBAPP_NAME: msp-sap-api2  # Updated to your actual app nameee
   PYTHON_VERSION: '3.9'
 
 jobs:
