@@ -12,7 +12,7 @@ from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'shared'))
 from msp_sap_integration_fixed import safe_float_conversion, JSONEncoder
 
-# Import our processing functions
+# Import our processing functionsss
 from msp_sap_integration_fixed import (
     read_from_blob, 
     save_to_blob, 
@@ -22,7 +22,7 @@ from msp_sap_integration_fixed import (
 )
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+CORS(app)  # Enable CORS for all routesS
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
