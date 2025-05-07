@@ -10,17 +10,28 @@ from datetime import datetime
 import logging
 from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'shared'))
-from msp_sap_integration_fixed import safe_float_conversion, JSONEncoder
+import os
+import sys
 
-# Import our processing functionsss
-from msp_sap_integration_fixed import (
-    read_from_blob, 
-    save_to_blob, 
-    generate_frontend_views,
-    safe_float_conversion,
-    JSONEncoder
-)
+# Try to import directly first (from API folder)
+try:
+    from msp_sap_integration_fixed import (
+        safe_float_conversion, 
+        JSONEncoder,
+        read_from_blob, 
+        save_to_blob, 
+        generate_frontend_views
+    )
+except ImportError:
+    # Fall back to shared folder if not found
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'shared'))
+    from msp_sap_integration_fixed import (
+        safe_float_conversion, 
+        JSONEncoder,
+        read_from_blob, 
+        save_to_blob, 
+        generate_frontend_views
+    )
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routesS
