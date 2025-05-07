@@ -16,7 +16,7 @@ function App() {
   const [error, setError] = useState(null);
 
   // Replace with your actual API endpoint
-  const API_URL = 'https://msp-sap-api2.azurewebsites.net';
+  const API_URL = 'https://msp-sap-api2-h5dmf6e6d4fngcbf.germanywestcentral-01.azurewebsites.net/';
 
   useEffect(() => {
     const fetchData = async () => {
