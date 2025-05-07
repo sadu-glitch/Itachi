@@ -11,8 +11,8 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: '.' # set this to the path to your web app project, defaults to the repository root
-  PYTHON_VERSION: '3.12' # set this to the python version to use (supports 3.6, 3.7, 3.8)
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: './function-app'  # set to function-app directory
+  PYTHON_VERSION: '3.12'
 
 jobs:
   build:
@@ -34,13 +34,21 @@ jobs:
           python -m venv venv
           source venv/bin/activate
 
+      - name: Copy shared code into function app directory
+        run: |
+          mkdir -p ./function-app/shared
+          cp -r ./shared/* ./function-app/shared/
+          
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r ./function-app/requirements.txt
 
       # Optional: Add step to run tests here
 
       - name: Zip artifact for deployment
-        run: zip release.zip ./* -r
+        run: |
+          cd function-app
+          zip -r ../release.zip ./*
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
@@ -69,9 +77,9 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_9C5CF381DB6247C3BEC08D6B11BAFE5E }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_C7B31598C4B94DBAAAB375D487189F3A }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_68D422DC775B4CDE99037B3FE5B7E59D }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_E3E799A04CD74F4FB3A80C9986C40262 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_A6A2FF19A3084D6C99C081375ED90332 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_5C075A93C9724AA483937233DB0EBAB8 }}
 
       - name: 'Deploy to Azure Functions'
         uses: Azure/functions-action@v1
@@ -79,5 +87,4 @@ jobs:
         with:
           app-name: 'TestPythonMSP'
           slot-name: 'Production'
-          package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-          
+          package: '.'  # Deploy from current directory after unzipping
