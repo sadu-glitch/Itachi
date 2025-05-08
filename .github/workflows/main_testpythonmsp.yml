@@ -34,7 +34,7 @@ jobs:
           python -m venv venv
           source venv/bin/activate
 
-      - name: Prepare function directory structure
+      - name: Copy shared code and prepare function structure
         run: |
           # Create function directory if it doesn't exist
           mkdir -p ./function-app/msp_sap_integration
@@ -43,29 +43,11 @@ jobs:
           cp ./shared/msp_sap_integration_fixed.py ./function-app/msp_sap_integration/
           
           # Create function.json with your specific configuration
-          cat > ./function-app/msp_sap_integration/function.json << 'EOF'
-          {
-            "scriptFile": "__init__.py",
-            "bindings": [
-              {
-                "authLevel": "function",
-                "type": "httpTrigger",
-                "direction": "in",
-                "name": "req",
-                "methods": [ "get", "post" ]
-              },
-              {
-                "type": "http",
-                "direction": "out",
-                "name": "$return"
-              }
-            ]
-          }
-          EOF
+          echo '{"scriptFile": "__init__.py","bindings": [{"authLevel": "function","type": "httpTrigger","direction": "in","name": "req","methods": [ "get", "post" ]},{"type": "http","direction": "out","name": "$return"}]}' > ./function-app/msp_sap_integration/function.json
           
-          # Create __init__.py with our integration code
-          cat > ./function-app/msp_sap_integration/__init__.py << 'EOF'
-          import logging
+      - name: Create __init__.py file
+        run: |
+          echo 'import logging
           import azure.functions as func
 
           try:
@@ -122,28 +104,12 @@ jobs:
                           "Cannot run the full process because required packages are missing. "
                           "Please check the deployment and ensure all requirements are installed.",
                           status_code=500
-                      )
-          EOF
+                      )' > ./function-app/msp_sap_integration/__init__.py
           
-          # Make sure host.json exists
+      - name: Create host.json if needed
+        run: |
           if [ ! -f ./function-app/host.json ]; then
-            cat > ./function-app/host.json << 'EOF'
-            {
-              "version": "2.0",
-              "logging": {
-                "applicationInsights": {
-                  "samplingSettings": {
-                    "isEnabled": true,
-                    "excludedTypes": "Request"
-                  }
-                }
-              },
-              "extensionBundle": {
-                "id": "Microsoft.Azure.Functions.ExtensionBundle",
-                "version": "[3.*, 4.0.0)"
-              }
-            }
-            EOF
+            echo '{"version": "2.0","logging": {"applicationInsights": {"samplingSettings": {"isEnabled": true,"excludedTypes": "Request"}}},"extensionBundle": {"id": "Microsoft.Azure.Functions.ExtensionBundle","version": "[3.*, 4.0.0)"}}' > ./function-app/host.json
           fi
           
       - name: Install dependencies
