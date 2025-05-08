@@ -3,12 +3,25 @@ import azure.functions as func
 import sys
 import os
 
-# Add shared folder to path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
+# Add shared folder to path - this should point to shared inside function-app
+shared_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'shared')
+sys.path.append(shared_path)
 
-# Import the main function from the shared module
-# You can modify this import based on what you need from msp_sap_integration_fixed.py
-from msp_sap_integration_fixed import main as process_integration
+try:
+    # Log the available paths
+    logging.info(f"System path: {sys.path}")
+    
+    # Log the contents of the shared directory
+    if os.path.exists(shared_path):
+        logging.info(f"Shared directory exists. Contents: {os.listdir(shared_path)}")
+    else:
+        logging.error(f"Shared directory does not exist: {shared_path}")
+    
+    # Import the main function from the shared module
+    from msp_sap_integration_fixed import main as process_integration
+except Exception as e:
+    logging.error(f"Import error: {str(e)}")
+    raise
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info("HTTP trigger received a request.")
