@@ -817,7 +817,7 @@ def generate_frontend_views(processed_data: Dict) -> None:
     departments = {}
     
     for tx in processed_data['transactions']:
-        if 'department' not in tx:
+        if 'department' not in tx or tx['department'] is None or pd.isna(tx['department']):
             continue
             
         dept = tx['department']
@@ -836,8 +836,8 @@ def generate_frontend_views(processed_data: Dict) -> None:
         elif tx.get('budget_impact') == 'Reserved':
             departments[dept]['reserved_amount'] += safe_float_conversion(tx.get('estimated_amount', 0))
             
-        # Track regions
-        if 'region' in tx:
+        # Track regions - with NaN check
+        if 'region' in tx and tx['region'] is not None and not pd.isna(tx['region']):
             departments[dept]['regions'].add(tx['region'])
     
     # Convert to list and finalize
@@ -851,7 +851,9 @@ def generate_frontend_views(processed_data: Dict) -> None:
     regions = {}
     
     for tx in processed_data['transactions']:
-        if 'region' not in tx or 'department' not in tx:
+        if 'region' not in tx or tx['region'] is None or pd.isna(tx['region']):
+            continue
+        if 'department' not in tx or tx['department'] is None or pd.isna(tx['department']):
             continue
             
         region_key = f"{tx['department']}|{tx['region']}"
@@ -871,8 +873,8 @@ def generate_frontend_views(processed_data: Dict) -> None:
         elif tx.get('budget_impact') == 'Reserved':
             regions[region_key]['reserved_amount'] += safe_float_conversion(tx.get('estimated_amount', 0))
             
-        # Track districts
-        if 'district' in tx:
+        # Track districts - ADD THIS CHECK to prevent NaN values
+        if 'district' in tx and tx['district'] is not None and not pd.isna(tx['district']):
             regions[region_key]['districts'].add(tx['district'])
     
     # Convert to list and finalize
@@ -886,22 +888,32 @@ def generate_frontend_views(processed_data: Dict) -> None:
     awaiting_assignment = {}
     
     for measure in processed_data['parked_measures']:
-        if measure.get('status') != 'Awaiting Assignment' or 'department' not in measure:
+        if measure.get('status') != 'Awaiting Assignment':
+            continue
+        if 'department' not in measure or measure['department'] is None or pd.isna(measure['department']):
             continue
             
         dept = measure['department']
         if dept not in awaiting_assignment:
             awaiting_assignment[dept] = []
             
-        awaiting_assignment[dept].append({
+        # Create a safe version of the measure data with NaN checks
+        safe_measure = {
             'measure_id': measure['measure_id'],
             'bestellnummer': measure['bestellnummer'],
             'measure_title': measure['measure_title'],
             'estimated_amount': measure['estimated_amount'],
             'measure_date': measure['measure_date'],
-            'name': measure.get('name', ''),
             'department': dept
-        })
+        }
+        
+        # Only add 'name' if it exists and is not NaN
+        if 'name' in measure and measure['name'] is not None and not pd.isna(measure['name']):
+            safe_measure['name'] = measure['name']
+        else:
+            safe_measure['name'] = ''
+            
+        awaiting_assignment[dept].append(safe_measure)
     
     # Save the views to blob storage in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
@@ -944,7 +956,6 @@ def generate_frontend_views(processed_data: Dict) -> None:
     
     elapsed_time = time.time() - start_time
     logger.info(f"Generated frontend views in {elapsed_time:.2f} seconds")
-
 # -----------------------------------------------------------------------------
 # Main script execution
 # -----------------------------------------------------------------------------
