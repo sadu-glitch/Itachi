@@ -41,7 +41,8 @@ jobs:
           
       - name: Install dependencies
         run: |
-          pip install -r ./function-app/requirements.txt
+          python -m pip install --upgrade pip
+          pip install --target="./function-app/.python_packages/lib/site-packages" -r ./function-app/requirements.txt
 
       # Optional: Add step to run tests here
 

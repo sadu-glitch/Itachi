@@ -1,14 +1,7 @@
-# Core data processing
 pandas>=2.0.0
 numpy>=1.24.0
-
-# Azure services
 azure-storage-blob>=12.0.0
 azure-functions
-
-# File handling
-openpyxl  # For Excel support
-
-# Optional packages that might be needed
+openpyxl  
 python-dateutil
 pytz

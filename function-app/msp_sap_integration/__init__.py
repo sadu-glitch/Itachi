@@ -3,25 +3,25 @@ import azure.functions as func
 import sys
 import os
 
-# Add shared folder to path - this should point to shared inside function-app
-shared_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'shared')
-sys.path.append(shared_path)
-
 try:
-    # Log the available paths
-    logging.info(f"System path: {sys.path}")
+    # Try importing dependencies
+    import pandas as pd
+    import numpy as np
+    from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
     
-    # Log the contents of the shared directory
-    if os.path.exists(shared_path):
-        logging.info(f"Shared directory exists. Contents: {os.listdir(shared_path)}")
-    else:
-        logging.error(f"Shared directory does not exist: {shared_path}")
+    # If successful, try importing the main module
+    shared_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'shared')
+    sys.path.append(shared_path)
     
-    # Import the main function from the shared module
     from msp_sap_integration_fixed import main as process_integration
-except Exception as e:
+    
+    # Flag to indicate if we can run the full process
+    CAN_RUN_FULL_PROCESS = True
+    
+except ImportError as e:
     logging.error(f"Import error: {str(e)}")
-    raise
+    # Flag to indicate we can't run the full process
+    CAN_RUN_FULL_PROCESS = False
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info("HTTP trigger received a request.")
@@ -39,16 +39,24 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     if name:
         return func.HttpResponse(f"Hello, {name}!")
     else:
-        try:
-            # If no name was provided, run the SAP integration process
-            process_integration()
+        if CAN_RUN_FULL_PROCESS:
+            try:
+                # Run the full process
+                process_integration()
+                return func.HttpResponse(
+                    "SAP integration process completed successfully.",
+                    status_code=200
+                )
+            except Exception as e:
+                logging.error(f'Error in SAP integration process: {str(e)}')
+                return func.HttpResponse(
+                    f"Error during processing: {str(e)}",
+                    status_code=500
+                )
+        else:
+            # Return a message about missing dependencies
             return func.HttpResponse(
-                "SAP integration process completed successfully.",
-                status_code=200
-            )
-        except Exception as e:
-            logging.error(f'Error in SAP integration process: {str(e)}')
-            return func.HttpResponse(
-                f"Error during processing: {str(e)}",
+                "Cannot run the full process because required packages are missing. "
+                "Please check the deployment and ensure all requirements are installed.",
                 status_code=500
             )
