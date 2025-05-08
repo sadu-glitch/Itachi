@@ -114,8 +114,16 @@ jobs:
           
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install --target="./function-app/.python_packages/lib/site-packages" -r ./function-app/requirements.txt
+            python -m pip install --upgrade pip
+            
+            # Install packages to .python_packages directory (standard approach)
+            pip install --target="./function-app/.python_packages/lib/site-packages" -r ./function-app/requirements.txt
+            
+            # Also install to the Python site-packages (some environments look here)
+            pip install -r ./function-app/requirements.txt
+            
+            # Create a requirements.txt in the function folder (Azure sometimes looks for this)
+            cp ./function-app/requirements.txt ./function-app/msp_sap_integration/
 
       - name: Zip artifact for deployment
         run: |
@@ -152,6 +160,12 @@ jobs:
           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_E3E799A04CD74F4FB3A80C9986C40262 }}
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_A6A2FF19A3084D6C99C081375ED90332 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_5C075A93C9724AA483937233DB0EBAB8 }}
+
+      - name: Add deployment settings to ensure packages are installed
+        uses: azure/cli@v1.0.0
+        with:
+          inlineScript: |
+            az webapp config appsettings set --name TestPythonMSP --resource-group TestPythonMSP_group --settings PYTHON_ENABLE_WORKER_EXTENSIONS=1 SCM_DO_BUILD_DURING_DEPLOYMENT=true ENABLE_ORYX_BUILD=true
 
       - name: 'Deploy to Azure Functions'
         uses: Azure/functions-action@v1

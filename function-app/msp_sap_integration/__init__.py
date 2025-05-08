@@ -1,23 +1,37 @@
 import logging
 import azure.functions as func
+import sys
+
+# Flag to indicate if we can run the full process
+CAN_RUN_FULL_PROCESS = False
 
 try:
-    # Try importing dependencies
+    # Try importing dependencies step by step with detailed logging
+    logging.info("Starting imports...")
+    
     import pandas as pd
+    logging.info("Imported pandas")
+    
     import numpy as np
+    logging.info("Imported numpy")
+    
     from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
+    logging.info("Imported azure.storage.blob")
     
     # Import the processing function from the original file name
     from .msp_sap_integration_fixed import main as process_integration
+    logging.info("Successfully imported process_integration")
     
-    # Flag to indicate if we can run the full process
+    # Log the Python path for debugging
+    logging.info(f"Python path: {sys.path}")
+    
+    # If we made it here, all imports succeeded
     CAN_RUN_FULL_PROCESS = True
-    logging.info("Successfully imported all dependencies and process_integration")
     
 except ImportError as e:
     logging.error(f"Import error: {str(e)}")
-    # Flag to indicate we can't run the full process
-    CAN_RUN_FULL_PROCESS = False
+    logging.error(f"Python path: {sys.path}")
+    # We'll leave CAN_RUN_FULL_PROCESS as False
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info("HTTP trigger received a request.")
