@@ -968,7 +968,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         # Execute the MSP SAP Integration process
         process_data()
         
-        # Return success response
+        # Return success responseee
         return func.HttpResponse(
             json.dumps({"status": "success", "message": "MSP SAP Integration completed successfully"}),
             mimetype="application/json",
