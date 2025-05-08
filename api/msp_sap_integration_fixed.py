@@ -957,7 +957,7 @@ def generate_frontend_views(processed_data: Dict) -> None:
     elapsed_time = time.time() - start_time
     logger.info(f"Generated frontend views in {elapsed_time:.2f} seconds")
 # -----------------------------------------------------------------------------
-# Main script execution
+# Main script executionnn
 # -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
