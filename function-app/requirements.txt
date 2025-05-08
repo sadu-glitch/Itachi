@@ -2,3 +2,5 @@ azure-functions
 pandas
 numpy
 azure-storage-blob
+python-dateutil
+openpyxl
