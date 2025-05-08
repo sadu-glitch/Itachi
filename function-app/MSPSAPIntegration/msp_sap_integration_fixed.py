@@ -117,7 +117,7 @@ logger = logging.getLogger("msp_sap_integration")
 MOCK_DATA_SAS_URL = os.environ["MOCK_DATA_SAS_URL"]
 PROCESSED_DATA_SAS_URL = os.environ["PROCESSED_DATA_SAS_URL"]
 
-# Create BlobServiceClient objects for each container
+# Create BlobServiceClient objects for each containerrr
 mock_data_container_client = ContainerClient.from_container_url(MOCK_DATA_SAS_URL)
 processed_data_container_client = ContainerClient.from_container_url(PROCESSED_DATA_SAS_URL)
 

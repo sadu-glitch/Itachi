@@ -8,7 +8,7 @@ on:
       - 'function-app/**'
 
 env:
-  AZURE_FUNCTIONAPP_NAME: msp-sap-integration  # Change to your function app nameee
+  AZURE_FUNCTIONAPP_NAME: TestPythonMSP  # Update this to your actual function app name
   AZURE_FUNCTIONAPP_PACKAGE_PATH: 'function-app'
   PYTHON_VERSION: '3.9'
 
