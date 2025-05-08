@@ -113,8 +113,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("msp_sap_integration")
 
 # Azure Storage credentials
-MOCK_DATA_SAS_URL = "https://financedatastore.blob.core.windows.net/mock-data?sp=racwdli&st=2025-05-05T14:24:17Z&se=2026-12-30T23:24:17Z&spr=https&sv=2024-11-04&sr=c&sig=4qw%2BrpMKNCvKzNAN0%2FIaeS%2BU0Qenb1YhJDhpJDaVMC0%3D"
-PROCESSED_DATA_SAS_URL = "https://financedatastore.blob.core.windows.net/processed-data?sp=racwdli&st=2025-05-05T14:27:31Z&se=2026-08-30T22:27:31Z&spr=https&sv=2024-11-04&sr=c&sig=3OHdNWWQ%2FRuGyxebi8746XC1%2F1Cc3uzld9wjrdFIfL0%3D"
+# Azure Storage credentials
+MOCK_DATA_SAS_URL = os.environ["MOCK_DATA_SAS_URL"]
+PROCESSED_DATA_SAS_URL = os.environ["PROCESSED_DATA_SAS_URL"]
 
 # Create BlobServiceClient objects for each container
 mock_data_container_client = ContainerClient.from_container_url(MOCK_DATA_SAS_URL)

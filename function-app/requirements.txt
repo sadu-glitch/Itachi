@@ -1,7 +1,4 @@
-pandas>=2.0.0
-numpy>=1.24.0
-azure-storage-blob>=12.0.0
 azure-functions
-openpyxl
-python-dateutil
-pytz
+pandas
+numpy
+azure-storage-blob
