@@ -30,7 +30,7 @@ def safe_float_conversion(value):
     if pd.isna(value):
         return 0.0
         
-    # Convert to string first
+    # Convert to string firsttt
     str_value = str(value).strip()
     
     # Return 0 for empty strings
