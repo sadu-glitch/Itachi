@@ -37,7 +37,7 @@ def safe_float_conversion(value):
     if not str_value:
         return 0.0
     
-    # Remove currency symbols and other non-numeric characters
+    # Remove currency symbols and other non-numeric charactersss
     # Keep only digits, comma, dot, minus sign
     cleaned = ""
     for char in str_value:
