@@ -1,6 +1,6 @@
 import React from 'react';
 
-function Dashboard({ stats, budgetData }) {
+function Dashboard({ stats, budgetData, awaitingAssignment }) {
   // Format currency values
   const formatCurrency = (value) => {
     return new Intl.NumberFormat('de-DE', {
@@ -54,6 +54,22 @@ function Dashboard({ stats, budgetData }) {
               <div>Used</div>
               <div>Remaining</div>
             </div>
+
+      <div className="test-debug">
+  <h3>🧪 Debug: Awaiting Assignment Count</h3>
+  <p>
+    Total departments with awaiting measures:{' '}
+    {Object.keys(awaitingAssignment || {}).length}
+  </p>
+  <ul>
+    {Object.entries(awaitingAssignment || {}).map(([dept, measures]) => (
+      <li key={dept}>
+        {dept}: {measures.length} measures
+      </li>
+    ))}
+  </ul>
+</div>
+
             
             {Object.entries(budgetData.departments || {}).map(([dept, data]) => (
               <div className="budget-row" key={dept}>

@@ -54,6 +54,7 @@ function App() {
           <Dashboard 
             stats={apiData.transaction_stats} 
             budgetData={apiData.budget_allocation} 
+            awaitingAssignment={apiData.awaiting_assignment}
           />
           
           <TransactionsList 
