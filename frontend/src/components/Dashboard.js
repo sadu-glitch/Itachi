@@ -1,22 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import {XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from 'recharts';
+import { XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from 'recharts';
 
-// Main Dashboard component
-const Dashboard = () => {
-  // State management
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [data, setData] = useState({
-    departments: { departments: [] },
-    regions: { regions: [] },
-    awaiting_assignment: {},
-    budget_allocation: { departments: {}, regions: {} },
-    transaction_stats: {}
-  });
-  const [transactions, setTransactions] = useState({ transactions: [], total: 0 });
+// Main Dashboard component that accepts props from App.js
+const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
+  // State management for UI interactions
   const [selectedDepartment, setSelectedDepartment] = useState(null);
   const [selectedRegion, setSelectedRegion] = useState(null);
   const [selectedTransaction, setSelectedTransaction] = useState(null);
+  const [transactions, setTransactions] = useState({ transactions: [], total: 0 });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [assignmentForm, setAssignmentForm] = useState({
     bestellnummer: '',
     region: '',
@@ -26,18 +19,29 @@ const Dashboard = () => {
     department: '',
     amount: 0
   });
+  
+  // State to store full data (will be fetched once a department is selected)
+  const [departmentsData, setDepartmentsData] = useState({ departments: [] });
+  const [regionsData, setRegionsData] = useState({ regions: [] });
 
-  // Fetch all data on component mounttt
+  // Get the base API URL - use provided apiUrl or fall back to localhost for development
+  const baseApiUrl = apiUrl || 'http://localhost:5000';
+
+  // Fetch departments and regions data when component mounts
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchInitialData = async () => {
       try {
         setLoading(true);
-        const response = await fetch('http://localhost:5000/api/data');
+        const response = await fetch(`${baseApiUrl}/api/data`);
         if (!response.ok) {
           throw new Error('Network response was not ok');
         }
-        const jsonData = await response.json();
-        setData(jsonData);
+        const data = await response.json();
+        
+        // Store the full data structure
+        setDepartmentsData(data.departments || { departments: [] });
+        setRegionsData(data.regions || { regions: [] });
+        
         setLoading(false);
       } catch (err) {
         setError(err.message);
@@ -45,8 +49,8 @@ const Dashboard = () => {
       }
     };
 
-    fetchData();
-  }, []);
+    fetchInitialData();
+  }, [baseApiUrl]);
 
   // Fetch transactions when department changes
   useEffect(() => {
@@ -55,7 +59,7 @@ const Dashboard = () => {
       
       try {
         setLoading(true);
-        let url = `http://localhost:5000/api/transactions?department=${encodeURIComponent(selectedDepartment)}`;
+        let url = `${baseApiUrl}/api/transactions?department=${encodeURIComponent(selectedDepartment)}`;
         if (selectedRegion) {
           url += `&region=${encodeURIComponent(selectedRegion)}`;
         }
@@ -74,7 +78,7 @@ const Dashboard = () => {
     };
 
     fetchTransactions();
-  }, [selectedDepartment, selectedRegion]);
+  }, [selectedDepartment, selectedRegion, baseApiUrl]);
 
   // Handle department selection
   const handleDepartmentClick = (department) => {
@@ -113,7 +117,7 @@ const Dashboard = () => {
     
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:5000/api/assign-measure', {
+      const response = await fetch(`${baseApiUrl}/api/assign-measure`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -130,13 +134,16 @@ const Dashboard = () => {
       }
       
       // Refresh data after assignment
-      const dataResponse = await fetch('http://localhost:5000/api/data');
+      const dataResponse = await fetch(`${baseApiUrl}/api/data`);
       const jsonData = await dataResponse.json();
-      setData(jsonData);
+      
+      // Update data states
+      setDepartmentsData(jsonData.departments || { departments: [] });
+      setRegionsData(jsonData.regions || { regions: [] });
       
       // Refresh transactions if department is selected
       if (selectedDepartment) {
-        const txResponse = await fetch(`http://localhost:5000/api/transactions?department=${encodeURIComponent(selectedDepartment)}`);
+        const txResponse = await fetch(`${baseApiUrl}/api/transactions?department=${encodeURIComponent(selectedDepartment)}`);
         const txData = await txResponse.json();
         setTransactions(txData);
       }
@@ -171,7 +178,7 @@ const Dashboard = () => {
       setLoading(true);
       
       // Get current budget allocation
-      const currentBudget = { ...data.budget_allocation };
+      const currentBudget = { ...budgetData };
       
       // Update department budget
       if (currentBudget.departments && budgetForm.department) {
@@ -182,7 +189,7 @@ const Dashboard = () => {
       }
       
       // Save updated budget
-      const response = await fetch('http://localhost:5000/api/budget-allocation', {
+      const response = await fetch(`${baseApiUrl}/api/budget-allocation`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -194,11 +201,6 @@ const Dashboard = () => {
         throw new Error('Network response was not ok');
       }
       
-      // Refresh data after budget update
-      const dataResponse = await fetch('http://localhost:5000/api/data');
-      const jsonData = await dataResponse.json();
-      setData(jsonData);
-      
       // Reset form
       setBudgetForm({
         department: '',
@@ -206,6 +208,9 @@ const Dashboard = () => {
       });
       
       setLoading(false);
+      
+      // Reload the page to refresh all data
+      window.location.reload();
     } catch (err) {
       setError(err.message);
       setLoading(false);
@@ -223,7 +228,7 @@ const Dashboard = () => {
   };
 
   // If loading, show loading message
-  if (loading && !data.departments.departments.length) {
+  if (loading && !departmentsData.departments.length) {
     return <div className="flex justify-center items-center h-screen">Loading data...</div>;
   }
 
@@ -232,8 +237,8 @@ const Dashboard = () => {
     return <div className="bg-red-100 p-4 rounded text-red-700">Error: {error}</div>;
   }
 
-  // Extract departments and prepare data for charts
-  const departments = data.departments.departments || [];
+  // Extract departments
+  const departments = departmentsData.departments || [];
   
   // Prepare chart data
   const departmentChartData = departments.map(dept => ({
@@ -245,19 +250,19 @@ const Dashboard = () => {
 
   // Filter regions for selected department
   const departmentRegions = selectedDepartment 
-    ? (data.regions.regions || []).filter(region => region.department === selectedDepartment)
+    ? (regionsData.regions || []).filter(region => region.department === selectedDepartment)
     : [];
 
   // Get parked measures for selected department
-  const parkedMeasures = selectedDepartment && data.awaiting_assignment 
-    ? (data.awaiting_assignment[selectedDepartment] || [])
+  const parkedMeasures = selectedDepartment && awaitingAssignment 
+    ? (awaitingAssignment[selectedDepartment] || [])
     : [];
 
   // Calculate statistics
-  const totalTransactions = data.transaction_stats?.total_sap_transactions || 0;
-  const bookedMeasures = data.transaction_stats?.booked_measures_count || 0;
-  const directCosts = data.transaction_stats?.direct_costs_count || 0;
-  const parkedCount = data.transaction_stats?.parked_measures_count || 0;
+  const totalTransactions = stats?.total_sap_transactions || 0;
+  const bookedMeasures = stats?.booked_measures_count || 0;
+  const directCosts = stats?.direct_costs_count || 0;
+  const parkedCount = stats?.parked_measures_count || 0;
 
   return (
     <div className="p-4 max-w-full">

@@ -52,10 +52,11 @@ function App() {
       ) : (
         <>
           <Dashboard 
-            stats={apiData.transaction_stats} 
-            budgetData={apiData.budget_allocation} 
-            awaitingAssignment={apiData.awaiting_assignment}
-          />
+  stats={apiData.transaction_stats} 
+  budgetData={apiData.budget_allocation} 
+  awaitingAssignment={apiData.awaiting_assignment}
+  apiUrl={API_URL}
+/>
           
           <TransactionsList 
             awaitingAssignment={apiData.awaiting_assignment}
