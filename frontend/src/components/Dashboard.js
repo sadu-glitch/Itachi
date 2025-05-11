@@ -27,7 +27,7 @@ const Dashboard = () => {
     amount: 0
   });
 
-  // Fetch all data on component mount
+  // Fetch all data on component mounttt
   useEffect(() => {
     const fetchData = async () => {
       try {
