@@ -55,7 +55,7 @@ function App() {
   stats={apiData.transaction_stats} 
   budgetData={apiData.budget_allocation} 
   awaitingAssignment={apiData.awaiting_assignment}
-  apiUrl={API_URL}
+  apiUrl={API_URL}  // Add this line
 />
           
           <TransactionsList 
