@@ -1,49 +1,17 @@
-// API configuration
-// Default to localhost for development, but this will be overridden by the apiConfig
-let API_BASE_URL = 'http://localhost:5000/api';
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import './index.css';
+import App from './App';
+import reportWebVitals from './reportWebVitals';
 
-// Function to initialize the API with the correct base URL
-export const initializeApi = (apiConfig) => {
-  if (apiConfig && apiConfig.baseUrl) {
-    API_BASE_URL = `${apiConfig.baseUrl}/api`;
-    console.log('API initialized with base URL:', API_BASE_URL);
-  }
-};
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
 
-// Helper function for API requests
-const fetchWithErrorHandling = async (url, options = {}) => {
-  try {
-    const response = await fetch(url, options);
-    
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.message || `Request failed with status ${response.status}`);
-    }
-    
-    return await response.json();
-  } catch (error) {
-    console.error('API request error:', error);
-    throw error;
-  }
-};
-
-// Generic API request methods
-export const apiGet = (endpoint) => {
-  return fetchWithErrorHandling(`${API_BASE_URL}/${endpoint}`);
-};
-
-export const apiPost = (endpoint, data) => {
-  return fetchWithErrorHandling(`${API_BASE_URL}/${endpoint}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(data),
-  });
-};
-
-export default {
-  initializeApi,
-  apiGet,
-  apiPost
-};
+// If you want to start measuring performance in your app, pass a function
+// to log results (for example: reportWebVitals(console.log))
+// or send to an analytics endpoint. Learn more: https://bit.ly/CRA-vitalss
+reportWebVitals();

@@ -1,45 +1,70 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { AppContextProvider } from './context/AppContext';
-import { BudgetContextProvider } from './context/BudgetContext';
-import MainLayout from './components/layout/MainLayout';
-import DashboardPage from './pages/DashboardPage';
-import DepartmentsPage from './pages/DepartmentsPage';
-import DepartmentDetailPage from './pages/DepartmentDetailPage';
-import RegionDetailPage from './pages/RegionDetailPage';
-import ParkedMeasuresPage from './pages/ParkedMeasuresPage';
-import BudgetAllocationPage from './pages/BudgetAllocationPage';
-import AdminPage from './pages/AdminPage';
-import './App.css';
-
-// Store API URL in a constant or environment variable
-// This should match your Azure environment
-const API_URL = 'https://msp-sap-api2-h5dmf6e6d4fngcbf.germanywestcentral-01.azurewebsites.net';
-
-// Create an API config to pass to context providers
-const apiConfig = {
-  baseUrl: API_URL
-};
+import React, { useState, useEffect } from 'react';
+import Header from './components/Header';
+import Dashboard from './components/Dashboard';
+import TransactionsList from './components/TransactionsList';
+import './styles.css';
 
 function App() {
+  const [apiData, setApiData] = useState({
+    departments: [],
+    regions: [],
+    awaiting_assignment: [],
+    budget_allocation: {},
+    transaction_stats: {}
+  });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Replace with your actual API endpoint
+  const API_URL = 'https://msp-sap-api2-h5dmf6e6d4fngcbf.germanywestcentral-01.azurewebsites.net/';
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const response = await fetch(`${API_URL}/api/data`);
+        
+        if (!response.ok) {
+          throw new Error(`API request failed with status ${response.status}`);
+        }
+        
+        const data = await response.json();
+        setApiData(data);
+        setLoading(false);
+      } catch (err) {
+        console.error('Error fetching data:', err);
+        setError(err.message);
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
   return (
-    <AppContextProvider apiConfig={apiConfig}>
-      <BudgetContextProvider>
-        <Router>
-          <MainLayout>
-            <Routes>
-              <Route path="/" element={<DashboardPage />} />
-              <Route path="/departments" element={<DepartmentsPage />} />
-              <Route path="/departments/:departmentId" element={<DepartmentDetailPage />} />
-              <Route path="/regions/:regionId" element={<RegionDetailPage />} />
-              <Route path="/measures/parked" element={<ParkedMeasuresPage />} />
-              <Route path="/budget" element={<BudgetAllocationPage />} />
-              <Route path="/admin" element={<AdminPage />} />
-            </Routes>
-          </MainLayout>
-        </Router>
-      </BudgetContextProvider>
-    </AppContextProvider>
+    <div className="app">
+      <Header />
+      
+      {loading ? (
+        <div className="loading">Loading data...</div>
+      ) : error ? (
+        <div className="error">Error: {error}</div>
+      ) : (
+        <>
+          <Dashboard 
+  stats={apiData.transaction_stats} 
+  budgetData={apiData.budget_allocation} 
+  awaitingAssignment={apiData.awaiting_assignment}
+  apiUrl={API_URL}  // Add this line
+/>
+          
+          <TransactionsList 
+            awaitingAssignment={apiData.awaiting_assignment}
+            apiUrl={API_URL} 
+          />
+        </>
+      )}
+    </div>
   );
 }
 

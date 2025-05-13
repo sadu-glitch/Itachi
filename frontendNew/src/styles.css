@@ -1,0 +1,124 @@
+/* Define global CSS variables */
+:root {
+  /* Colors */
+  --primary-color: #1976d2;
+  --primary-dark: #1565c0;
+  --secondary-color: #f50057;
+  --secondary-dark: #c51162;
+  --success-color: #2e7d32;
+  --success-dark: #2e6b32;
+  --warning-color: #f57c00;
+  --warning-dark: #ef6c00;
+  --danger-color: #d32f2f;
+  --danger-dark: #b71c1c;
+  --info-color: #0288d1;
+  --info-dark: #0277bd;
+  --light-color: #f5f5f5;
+  --dark-color: #333;
+  --grey-light: #e0e0e0;
+  --grey-medium: #9e9e9e;
+  --grey-dark: #616161;
+  
+  /* Spacing */
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 1.5rem;
+  --spacing-xl: 2rem;
+  --spacing-xxl: 3rem;
+  
+  /* Font sizes */
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.25rem;
+  --font-size-xl: 1.5rem;
+  --font-size-xxl: 2rem;
+  
+  /* Border radius */
+  --border-radius-sm: 4px;
+  --border-radius-md: 8px;
+  --border-radius-lg: 12px;
+  --border-radius-xl: 16px;
+  
+  /* Box shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 8px 16px rgba(0, 0, 0, 0.1);
+  
+  /* Transitions */
+  --transition-fast: 0.1s;
+  --transition-medium: 0.2s;
+  --transition-slow: 0.3s;
+  
+  /* Z-index */
+  --z-index-dropdown: 1000;
+  --z-index-sticky: 1020;
+  --z-index-fixed: 1030;
+  --z-index-modal-backdrop: 1040;
+  --z-index-modal: 1050;
+  --z-index-popover: 1060;
+  --z-index-tooltip: 1070;
+}
+
+/* Additional styling for budget-related elements */
+.budget-positive {
+  color: var(--success-color);
+}
+
+.budget-warning {
+  color: var(--warning-color);
+}
+
+.budget-negative {
+  color: var(--danger-color);
+}
+
+/* Status indicators */
+.status-indicator {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 8px;
+}
+
+.status-direct {
+  background-color: var(--success-color);
+}
+
+.status-booked {
+  background-color: var(--info-color);
+}
+
+.status-manual {
+  background-color: var(--warning-color);
+}
+
+.status-pending {
+  background-color: var(--danger-color);
+}
+
+.status-unknown {
+  background-color: var(--grey-medium);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--grey-medium);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--grey-dark);
+}
