@@ -30,14 +30,14 @@ def safe_float_conversion(value):
     if pd.isna(value):
         return 0.0
         
-    # Convert to string first
+    # Convert to string firsttt
     str_value = str(value).strip()
     
     # Return 0 for empty strings
     if not str_value:
         return 0.0
     
-    # Remove currency symbols and other non-numeric characters
+    # Remove currency symbols and other non-numeric charactersss
     # Keep only digits, comma, dot, minus sign
     cleaned = ""
     for char in str_value:
@@ -79,7 +79,16 @@ def safe_float_conversion(value):
             # If still fails, log and return 0
             logger.warning(f"Could not convert '{str_value}' to float, using 0 instead")
             return 0.0
+        
+def safe_get(row, column, default=None):
+    """
+    Safely get a value from a pandas row, converting NaN to a default value
+    """
+    if column not in row or pd.isna(row[column]):
+        return default
+    return row[column]
 
+# 1. Enhance the make_json_serializable function to better handle NaN values
 def make_json_serializable(obj):
     """
     Convert objects that are not JSON serializable to serializable formats
@@ -87,15 +96,18 @@ def make_json_serializable(obj):
     if isinstance(obj, pd.Timestamp):
         return obj.strftime('%Y-%m-%d %H:%M:%S')
     elif isinstance(obj, pd.Series):
-        return obj.to_dict()
+        # Convert NaN values to None in Series
+        return {k: None if pd.isna(v) else make_json_serializable(v) for k, v in obj.to_dict().items()}
     elif isinstance(obj, pd.DataFrame):
-        return obj.to_dict(orient='records')
+        # Handle NaN values in DataFrame
+        records = obj.to_dict(orient='records')
+        return [{k: None if pd.isna(v) else make_json_serializable(v) for k, v in record.items()} for record in records]
     elif isinstance(obj, np.integer):
         return int(obj)
     elif isinstance(obj, np.floating):
         return float(obj)
     elif isinstance(obj, np.ndarray):
-        return obj.tolist()
+        return [None if pd.isna(x) else make_json_serializable(x) for x in obj.tolist()]
     elif pd.isna(obj):
         return None
     else:
@@ -106,6 +118,14 @@ class JSONEncoder(json.JSONEncoder):
     Custom JSON encoder that handles pandas and numpy types
     """
     def default(self, obj):
+        # Handle NaN, infinity, and -infinity
+        if isinstance(obj, float):
+            if np.isnan(obj):
+                return None
+            elif np.isinf(obj) and obj > 0:
+                return "Infinity"
+            elif np.isinf(obj) and obj < 0:
+                return "-Infinity"
         return make_json_serializable(obj)
 
 # Configure logging
@@ -130,12 +150,12 @@ CACHE_EXPIRY = 3600  # Cache expiry in seconds
 # -----------------------------------------------------------------------------
 
 class LocationInfo:
-    """Simple class to store location information"""
+    """Simple class to store location information with fallback for empty values"""
     
     def __init__(self, department, region, district):
-        self.department = department
-        self.region = region
-        self.district = district
+        self.department = None if pd.isna(department) else department
+        self.region = None if pd.isna(region) else region
+        self.district = None if pd.isna(district) else district
     
     def to_dict(self):
         return {
@@ -274,28 +294,39 @@ def create_msp_index(msp_data: pd.DataFrame) -> Dict[int, pd.Series]:
 
 def create_mapping_index(mapping_floor: pd.DataFrame, mapping_hq: pd.DataFrame) -> Dict[str, LocationInfo]:
     """
-    Create an index for Kostenstelle mapping
+    Create an index for Kostenstelle mapping with protection against NaN values
     """
     mapping_index = {}
     
     # Index HQ mappings (starting with 1)
     for _, row in mapping_hq.iterrows():
         # Account for the trailing space in the column name "Kostenstelle "
-        kostenstelle = str(row['Kostenstelle '] if 'Kostenstelle ' in row.index else row['Kostenstelle']).strip()
+        kostenstelle_col = 'Kostenstelle ' if 'Kostenstelle ' in row.index else 'Kostenstelle'
+        kostenstelle = str(safe_get(row, kostenstelle_col, '')).strip()
+        
+        # Skip empty kostenstelle
+        if not kostenstelle:
+            continue
+            
         mapping_index[kostenstelle] = LocationInfo(
-            department=row['Abteilung'],
-            region=row['Bezeichnung'],
-            district='HQ'
+            department=safe_get(row, 'Abteilung', ''),  # Empty string as fallback
+            region=safe_get(row, 'Bezeichnung', ''),    # Empty string as fallback
+            district='HQ'                               # Always set district to HQ
         )
     
     # Index Floor mappings (starting with 3, extract digits 2-5)
     for _, row in mapping_floor.iterrows():
-        extracted_digits = str(row['Kostenstelle']).strip()
+        extracted_digits = str(safe_get(row, 'Kostenstelle', '')).strip()
+        
+        # Skip empty kostenstelle
+        if not extracted_digits:
+            continue
+            
         # We'll store with a special prefix to indicate it's for Floor
         mapping_index[f"FLOOR_{extracted_digits}"] = LocationInfo(
-            department=row['Department'],
-            region=row['Region'],
-            district=row['District']
+            department=safe_get(row, 'Department', ''),  # Empty string as fallback
+            region=safe_get(row, 'Region', ''),          # Empty string as fallback
+            district=safe_get(row, 'District', 'Floor')  # 'Floor' as fallback
         )
     
     logger.info(f"Created mapping index with {len(mapping_index)} entries")
@@ -406,7 +437,7 @@ def process_sap_batch(
     previous_parked_index: Dict[int, Dict]
 ) -> Dict:
     """
-    Process a batch of SAP transactions
+    Process a batch of SAP transactions with improved NaN handling
     """
     direct_costs = []
     booked_measures = []
@@ -415,43 +446,45 @@ def process_sap_batch(
     
     for _, transaction in batch.iterrows():
         # Extract and process Kostenstelle
-        kostenstelle = str(transaction['Kostenstelle'])
+        kostenstelle = str(safe_get(transaction, 'Kostenstelle', ''))
         location_info = map_kostenstelle_cached(kostenstelle, mapping_index)
         
         if location_info is None:
-            # Could not map Kostenstelle to location
+            # Could not map Kostenstelle to location - create default LocationInfo
+            location_info = LocationInfo('', '', '')
+            
             outliers.append({
-                'transaction_id': str(transaction['Belegnummer']),
-                'amount': safe_float_conversion(transaction['Betrag in Hauswährung']),
+                'transaction_id': str(safe_get(transaction, 'Belegnummer', '')),
+                'amount': safe_float_conversion(safe_get(transaction, 'Betrag in Hauswährung', 0)),
                 'kostenstelle': kostenstelle,
-                'text': str(transaction['Text']),
-                'booking_date': str(transaction['Buchungsdatum']),
+                'text': str(safe_get(transaction, 'Text', '')),
+                'booking_date': str(safe_get(transaction, 'Buchungsdatum', '')),
                 'category': 'OUTLIER',
                 'status': 'Unknown Location',
                 'budget_impact': 'None',
-                'department': None,
-                'region': None,
-                'district': None
+                'department': '',
+                'region': '',
+                'district': ''
             })
             continue
         
         # Extract Bestellnummer from Text field
-        text_field = str(transaction['Text'])
+        text_field = str(safe_get(transaction, 'Text', ''))
         bestellnummer = extract_bestellnummer_cached(text_field)
         
         if bestellnummer is None:
             # No valid Bestellnummer found
             direct_costs.append({
-                'transaction_id': str(transaction['Belegnummer']),
-                'amount': safe_float_conversion(transaction['Betrag in Hauswährung']),
+                'transaction_id': str(safe_get(transaction, 'Belegnummer', '')),
+                'amount': safe_float_conversion(safe_get(transaction, 'Betrag in Hauswährung', 0)),
                 'text': text_field,
-                'booking_date': str(transaction['Buchungsdatum']),
+                'booking_date': str(safe_get(transaction, 'Buchungsdatum', '')),
                 'category': 'DIRECT_COST',
                 'status': 'Direct Booked',
                 'budget_impact': 'Booked',
-                'department': location_info.department,
-                'region': location_info.region,
-                'district': location_info.district
+                'department': location_info.department or '',
+                'region': location_info.region or '',
+                'district': location_info.district or ''
             })
             continue
         
@@ -461,16 +494,16 @@ def process_sap_batch(
         if matching_measure is None:
             # Valid Bestellnummer, but no matching MSP measure
             direct_costs.append({
-                'transaction_id': str(transaction['Belegnummer']),
-                'amount': safe_float_conversion(transaction['Betrag in Hauswährung']),
+                'transaction_id': str(safe_get(transaction, 'Belegnummer', '')),
+                'amount': safe_float_conversion(safe_get(transaction, 'Betrag in Hauswährung', 0)),
                 'text': text_field,
-                'booking_date': str(transaction['Buchungsdatum']),
+                'booking_date': str(safe_get(transaction, 'Buchungsdatum', '')),
                 'category': 'DIRECT_COST',
                 'status': 'Direct Booked',
                 'budget_impact': 'Booked',
-                'department': location_info.department,
-                'region': location_info.region,
-                'district': location_info.district
+                'department': location_info.department or '',
+                'region': location_info.region or '',
+                'district': location_info.district or ''
             })
             continue
         
@@ -481,29 +514,33 @@ def process_sap_batch(
         previously_parked = bestellnummer in previous_parked_index
         
         # Get estimated and actual amounts with safe conversion
-        estimated_amount = safe_float_conversion(matching_measure['Benötigtes Budget (Geschätzt)'])
-        actual_amount = safe_float_conversion(transaction['Betrag in Hauswährung'])
+        estimated_amount = safe_float_conversion(safe_get(matching_measure, 'Benötigtes Budget (Geschätzt)', 0))
+        actual_amount = safe_float_conversion(safe_get(transaction, 'Betrag in Hauswährung', 0))
+        
+        # Create dictionary with safe handling for all fields
+        measure_data = {k: None if pd.isna(v) else v for k, v in matching_measure.to_dict().items()}
+        transaction_data = {k: None if pd.isna(v) else v for k, v in transaction.to_dict().items()}
         
         booked_measures.append({
-            'transaction_id': str(transaction['Belegnummer']),
-            'measure_id': str(matching_measure['Bestellnummer']),
+            'transaction_id': str(safe_get(transaction, 'Belegnummer', '')),
+            'measure_id': str(bestellnummer),
             'bestellnummer': int(bestellnummer),
-            'measure_title': matching_measure['Titel der Maßnahme'],
+            'measure_title': safe_get(matching_measure, 'Titel der Maßnahme', ''),
             'estimated_amount': estimated_amount,
             'actual_amount': actual_amount,
             'variance': actual_amount - estimated_amount,
             'text': text_field,
-            'booking_date': str(transaction['Buchungsdatum']),
-            'measure_date': str(matching_measure['Datum']),
+            'booking_date': str(safe_get(transaction, 'Buchungsdatum', '')),
+            'measure_date': str(safe_get(matching_measure, 'Datum', '')),
             'category': 'BOOKED_MEASURE',
             'status': 'SAP-MSP Booked',
             'previously_parked': previously_parked,
             'budget_impact': 'Booked',
-            'department': location_info.department,
-            'region': location_info.region,
-            'district': location_info.district,
-            'msp_data': matching_measure.to_dict(),
-            'sap_data': transaction.to_dict()
+            'department': location_info.department or '',
+            'region': location_info.region or '',
+            'district': location_info.district or '',
+            'msp_data': measure_data,
+            'sap_data': transaction_data
         })
     
     return {
@@ -512,20 +549,22 @@ def process_sap_batch(
         'outliers': outliers,
         'matched_bestellnummern': matched_bestellnummern
     }
-
 def process_parked_measures(
     msp_data: pd.DataFrame, 
     matched_bestellnummern: Set[int],
     previous_parked_index: Dict[int, Dict]
 ) -> List[Dict]:
     """
-    Process unmatched MSP measures
+    Process unmatched MSP measures with improved NaN handling
     """
     parked_measures = []
     
     for _, measure in msp_data.iterrows():
-        bestellnummer = measure['Bestellnummer']
+        bestellnummer = safe_get(measure, 'Bestellnummer')
         
+        if bestellnummer is None:
+            continue
+            
         if bestellnummer not in matched_bestellnummern:
             # This measure has no matching SAP transaction yet
             # Check if it was previously parked and has manual assignment
@@ -534,26 +573,30 @@ def process_parked_measures(
                 manual_assignment = previous_parked_index[bestellnummer]['manual_assignment']
             
             # Extract department from Gruppen field
-            department = extract_department_from_gruppen_cached(measure['Gruppen'])
+            gruppen = safe_get(measure, 'Gruppen', '')
+            department = extract_department_from_gruppen_cached(gruppen)
             
             # Use safe conversion for estimated amount
-            estimated_amount = safe_float_conversion(measure['Benötigtes Budget (Geschätzt)'])
+            estimated_amount = safe_float_conversion(safe_get(measure, 'Benötigtes Budget (Geschätzt)', 0))
+            
+            # Create dictionary with safe handling for all fields
+            measure_data = {k: None if pd.isna(v) else v for k, v in measure.to_dict().items()}
             
             parked_measure = {
                 'measure_id': str(bestellnummer),
                 'bestellnummer': int(bestellnummer),
-                'measure_title': measure['Titel der Maßnahme'],
+                'measure_title': safe_get(measure, 'Titel der Maßnahme', ''),
                 'estimated_amount': estimated_amount,
-                'measure_date': str(measure['Datum']),
-                'name': measure['Name'],
+                'measure_date': str(safe_get(measure, 'Datum', '')),
+                'name': safe_get(measure, 'Name', ''),
                 'category': 'PARKED_MEASURE',
                 'status': 'Manually assigned, awaiting SAP' if manual_assignment else 'Awaiting Assignment',
                 'budget_impact': 'Reserved',
                 'department': department,
-                'region': manual_assignment.get('region') if manual_assignment else None,
-                'district': manual_assignment.get('district') if manual_assignment else None,
+                'region': manual_assignment.get('region', '') if manual_assignment else '',
+                'district': manual_assignment.get('district', '') if manual_assignment else '',
                 'manual_assignment': manual_assignment,
-                'msp_data': measure.to_dict()
+                'msp_data': measure_data
             }
                 
             parked_measures.append(parked_measure)
@@ -648,8 +691,8 @@ def extract_department_from_gruppen_cached(gruppen_field: str) -> Optional[str]:
     """
     Extract department information from Gruppen field with caching
     """
-    if pd.isna(gruppen_field):
-        return None
+    if pd.isna(gruppen_field) or not gruppen_field:
+        return ''  # Return empty string instead of None
         
     gruppen_field = str(gruppen_field)
     
@@ -690,10 +733,9 @@ def extract_department_from_gruppen_cached(gruppen_field: str) -> Optional[str]:
                 break
     
     if not department_counts:
-        return None
-    
+        result = ''  # Return empty string instead of None
     # If only one department found
-    if len(department_counts) == 1:
+    elif len(department_counts) == 1:
         dept_code = list(department_counts.keys())[0]
         result = department_mapping[dept_code]
     else:
@@ -706,7 +748,7 @@ def extract_department_from_gruppen_cached(gruppen_field: str) -> Optional[str]:
                 max_count = count
                 most_frequent_dept = dept
         
-        result = department_mapping.get(most_frequent_dept)
+        result = department_mapping.get(most_frequent_dept, '')  # Empty string as fallback
     
     # Cache the result
     department_cache.set(gruppen_field, result)
@@ -809,7 +851,7 @@ def save_to_blob(container_name: str, blob_name: str, data: Any) -> None:
 
 def generate_frontend_views(processed_data: Dict) -> None:
     """
-    Generate specialized views for frontend consumption
+    Generate specialized views for frontend consumption with improved NaN handling
     """
     start_time = time.time()
     
@@ -817,10 +859,11 @@ def generate_frontend_views(processed_data: Dict) -> None:
     departments = {}
     
     for tx in processed_data['transactions']:
-        if 'department' not in tx or tx['department'] is None or pd.isna(tx['department']):
+        # Get department with empty string fallback
+        dept = tx.get('department', '')
+        if not dept:
             continue
             
-        dept = tx['department']
         if dept not in departments:
             departments[dept] = {
                 'name': dept,
@@ -836,9 +879,10 @@ def generate_frontend_views(processed_data: Dict) -> None:
         elif tx.get('budget_impact') == 'Reserved':
             departments[dept]['reserved_amount'] += safe_float_conversion(tx.get('estimated_amount', 0))
             
-        # Track regions - with NaN check
-        if 'region' in tx and tx['region'] is not None and not pd.isna(tx['region']):
-            departments[dept]['regions'].add(tx['region'])
+        # Track regions - skip empty region values
+        region = tx.get('region', '')
+        if region:
+            departments[dept]['regions'].add(region)
     
     # Convert to list and finalize
     departments_list = []
@@ -851,16 +895,18 @@ def generate_frontend_views(processed_data: Dict) -> None:
     regions = {}
     
     for tx in processed_data['transactions']:
-        if 'region' not in tx or tx['region'] is None or pd.isna(tx['region']):
-            continue
-        if 'department' not in tx or tx['department'] is None or pd.isna(tx['department']):
+        # Get region and department with empty string fallback
+        region = tx.get('region', '')
+        dept = tx.get('department', '')
+        
+        if not region or not dept:
             continue
             
-        region_key = f"{tx['department']}|{tx['region']}"
+        region_key = f"{dept}|{region}"
         if region_key not in regions:
             regions[region_key] = {
-                'department': tx['department'],
-                'name': tx['region'],
+                'department': dept,
+                'name': region,
                 'booked_amount': 0,
                 'reserved_amount': 0,
                 'districts': set()
@@ -873,9 +919,10 @@ def generate_frontend_views(processed_data: Dict) -> None:
         elif tx.get('budget_impact') == 'Reserved':
             regions[region_key]['reserved_amount'] += safe_float_conversion(tx.get('estimated_amount', 0))
             
-        # Track districts - ADD THIS CHECK to prevent NaN values
-        if 'district' in tx and tx['district'] is not None and not pd.isna(tx['district']):
-            regions[region_key]['districts'].add(tx['district'])
+        # Track districts - skip empty district values
+        district = tx.get('district', '')
+        if district:
+            regions[region_key]['districts'].add(district)
     
     # Convert to list and finalize
     regions_list = []
@@ -890,28 +937,26 @@ def generate_frontend_views(processed_data: Dict) -> None:
     for measure in processed_data['parked_measures']:
         if measure.get('status') != 'Awaiting Assignment':
             continue
-        if 'department' not in measure or measure['department'] is None or pd.isna(measure['department']):
-            continue
             
-        dept = measure['department']
+        # Get department with empty string fallback
+        dept = measure.get('department', '')
+        if not dept:
+            # If no department, put in 'Unassigned' category
+            dept = 'Unassigned'
+            
         if dept not in awaiting_assignment:
             awaiting_assignment[dept] = []
             
-        # Create a safe version of the measure data with NaN checks
+        # Create a safe version of the measure data
         safe_measure = {
-            'measure_id': measure['measure_id'],
-            'bestellnummer': measure['bestellnummer'],
-            'measure_title': measure['measure_title'],
-            'estimated_amount': measure['estimated_amount'],
-            'measure_date': measure['measure_date'],
-            'department': dept
+            'measure_id': measure.get('measure_id', ''),
+            'bestellnummer': measure.get('bestellnummer', 0),
+            'measure_title': measure.get('measure_title', ''),
+            'estimated_amount': safe_float_conversion(measure.get('estimated_amount', 0)),
+            'measure_date': measure.get('measure_date', ''),
+            'department': dept,
+            'name': measure.get('name', '')  # Empty string as fallback
         }
-        
-        # Only add 'name' if it exists and is not NaN
-        if 'name' in measure and measure['name'] is not None and not pd.isna(measure['name']):
-            safe_measure['name'] = measure['name']
-        else:
-            safe_measure['name'] = ''
             
         awaiting_assignment[dept].append(safe_measure)
     
