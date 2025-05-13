@@ -1,19 +1,10 @@
 import React from 'react';
 import TransactionList from './TransactionList';
 import ParkedMeasuresSection from './ParkedMeasuresSection';
+import { formatCurrency } from '../../utils/formatters';
 
 /**
  * Component to display department detail view with regions and transactions
- * @param {Object} props - Component props
- * @param {string} props.selectedDepartment - Selected department name
- * @param {Array} props.regions - Array of region data for the department
- * @param {Array} props.transactions - Array of transaction data
- * @param {Array} props.parkedMeasures - Array of parked measures awaiting assignment
- * @param {Function} props.onRegionClick - Handler for region selection
- * @param {Function} props.onTransactionClick - Handler for transaction selection
- * @param {Function} props.onBackClick - Handler for back button click
- * @param {Function} props.onAssignmentSuccess - Handler for successful assignment
- * @param {string} props.baseApiUrl - Base API URL
  */
 const DepartmentDetail = ({
   selectedDepartment,
@@ -26,6 +17,9 @@ const DepartmentDetail = ({
   onAssignmentSuccess,
   baseApiUrl
 }) => {
+  // Safety check - only proceed if we have a selected department
+  if (!selectedDepartment) return null;
+
   return (
     <div className="budget-summary">
       {/* Header with back button */}
@@ -64,8 +58,8 @@ const DepartmentDetail = ({
         ))}
       </div>
 
-      {/* Parked Measures */}
-      {parkedMeasures.length > 0 && (
+      {/* Parked Measures - ONLY show when they exist for this department */}
+      {parkedMeasures && parkedMeasures.length > 0 && (
         <ParkedMeasuresSection 
           parkedMeasures={parkedMeasures}
           regions={regions}
@@ -84,16 +78,6 @@ const DepartmentDetail = ({
       </div>
     </div>
   );
-};
-
-// Import at the top of your file
-const formatCurrency = (value) => {
-  return new Intl.NumberFormat('de-DE', {
-    style: 'currency',
-    currency: 'EUR',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(parseFloat(value) || 0);
 };
 
 export default DepartmentDetail;

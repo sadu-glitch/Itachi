@@ -78,6 +78,20 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
     return <div className="error">Error: {error}</div>;
   }
 
+  // Extract departments
+  const departments = departmentsData.departments || [];
+  
+  // Get parked measures for selected department ONLY when a department is selected
+  // This should NEVER be shown on the main dashboard view
+  const parkedMeasures = selectedDepartment && awaitingAssignment 
+    ? (awaitingAssignment[selectedDepartment] || [])
+    : [];
+
+  // Filter regions for selected department
+  const departmentRegions = selectedDepartment 
+    ? (regionsData.regions || []).filter(region => region.department === selectedDepartment)
+    : [];
+
   return (
     <div className="dashboard">
       <h2>Dashboard Overview</h2>
@@ -90,26 +104,26 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
         <>
           {/* Budget Setting Form - only shown in main view */}
           <BudgetAllocationForm 
-            departments={departmentsData.departments || []} 
+            departments={departments} 
             baseApiUrl={baseApiUrl} 
             onSuccess={refreshDepartmentData}
           />
           
           {/* Department Overview */}
           <DepartmentOverview 
-            departments={departmentsData.departments || []} 
+            departments={departments} 
             onDepartmentClick={handleDepartmentClick} 
           />
         </>
       )}
       
-      {/* Department Detail View */}
+      {/* Department Detail View - only show this when a department is selected */}
       {selectedDepartment && !selectedRegion && (
         <DepartmentDetail 
           selectedDepartment={selectedDepartment}
-          regions={regionsData.regions?.filter(region => region.department === selectedDepartment) || []}
+          regions={departmentRegions}
           transactions={transactions.transactions || []}
-          parkedMeasures={awaitingAssignment?.[selectedDepartment] || []}
+          parkedMeasures={parkedMeasures} // Only pass parked measures for this specific department
           onRegionClick={handleRegionClick}
           onTransactionClick={handleTransactionClick}
           onBackClick={() => setSelectedDepartment(null)}
@@ -133,7 +147,7 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
       {selectedTransaction && (
         <TransactionDetail 
           transaction={selectedTransaction}
-          regions={regionsData.regions?.filter(region => region.department === selectedDepartment) || []}
+          regions={departmentRegions}
           onClose={() => setSelectedTransaction(null)}
           onAssignmentSuccess={handleAssignmentSuccess}
           baseApiUrl={baseApiUrl}
