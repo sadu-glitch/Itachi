@@ -1,0 +1,98 @@
+.region-card {
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  padding: 20px;
+  margin-bottom: 20px;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.region-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.region-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 10px;
+}
+
+.region-card-header h3 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: #333;
+}
+
+.region-card-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.status-positive {
+  color: #4caf50;
+  font-weight: bold;
+  font-size: 1.2rem;
+}
+
+.status-negative {
+  color: #f44336;
+  font-weight: bold;
+  font-size: 1.2rem;
+}
+
+.status-label {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.region-card-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.region-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.meta-item {
+  display: flex;
+  align-items: center;
+}
+
+.meta-label {
+  color: #666;
+  margin-right: 5px;
+}
+
+.meta-value {
+  font-weight: bold;
+  color: #333;
+}
+
+.region-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 15px;
+}
+
+.btn-view-details {
+  display: inline-block;
+  padding: 8px 16px;
+  background-color: #2196f3;
+  color: white;
+  text-decoration: none;
+  border-radius: 4px;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.btn-view-details:hover {
+  background-color: #1976d2;
+}

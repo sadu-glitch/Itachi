@@ -1,0 +1,96 @@
+.budget-progress-container {
+  width: 100%;
+  margin: 15px 0;
+}
+
+.budget-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+
+.budget-allocated {
+  font-weight: bold;
+}
+
+.budget-summary {
+  display: flex;
+  gap: 15px;
+}
+
+.budget-booked span,
+.budget-reserved span,
+.budget-remaining span {
+  display: inline-block;
+  margin-right: 5px;
+}
+
+.booked-indicator,
+.reserved-indicator,
+.remaining-indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 5px;
+}
+
+.booked-indicator {
+  background-color: #2196f3; /* Blue */
+}
+
+.reserved-indicator {
+  background-color: #ff9800; /* Orange */
+}
+
+.remaining-indicator {
+  background-color: #e0e0e0; /* Light gray */
+  border: 1px solid #9e9e9e;
+}
+
+.budget-progress-bar {
+  width: 100%;
+  height: 20px;
+  background-color: #e0e0e0;
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.progress-booked,
+.progress-reserved {
+  height: 100%;
+  position: absolute;
+  top: 0;
+}
+
+.progress-booked {
+  background-color: #2196f3; /* Blue */
+  left: 0;
+}
+
+.progress-reserved {
+  background-color: #ff9800; /* Orange */
+}
+
+.budget-good {
+  border: 1px solid #4caf50; /* Green */
+}
+
+.budget-warning {
+  border: 1px solid #ffc107; /* Yellow */
+}
+
+.budget-critical {
+  border: 1px solid #ff9800; /* Orange */
+}
+
+.budget-over {
+  border: 1px solid #f44336; /* Red */
+}
+
+.budget-warning-message {
+  color: #f44336; /* Red */
+  font-weight: bold;
+  margin-top: 5px;
+}

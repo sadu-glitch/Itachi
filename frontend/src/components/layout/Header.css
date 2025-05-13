@@ -1,0 +1,81 @@
+.app-header {
+  background-color: #1976d2;
+  color: white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.header-content {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.header-logo h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 500;
+}
+
+.header-nav ul {
+  display: flex;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.header-nav li {
+  margin-left: 1.5rem;
+  position: relative;
+}
+
+.header-nav li a {
+  color: white;
+  text-decoration: none;
+  padding: 0.5rem 0;
+  display: block;
+  position: relative;
+}
+
+.header-nav li a:hover {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.header-nav li.active a {
+  font-weight: 600;
+}
+
+.header-nav li.active::after {
+  content: '';
+  position: absolute;
+  bottom: -0.5rem;
+  left: 0;
+  width: 100%;
+  height: 3px;
+  background-color: white;
+  border-radius: 3px;
+}
+
+@media (max-width: 768px) {
+  .header-content {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .header-nav {
+    margin-top: 1rem;
+    width: 100%;
+    overflow-x: auto;
+  }
+  
+  .header-nav ul {
+    width: max-content;
+  }
+  
+  .header-nav li {
+    margin-left: 0;
+    margin-right: 1.5rem;
+  }
+}

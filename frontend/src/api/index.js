@@ -1,14 +1,5 @@
 // API configuration
-// Default to localhost for development, but this will be overridden by the apiConfig
-let API_BASE_URL = 'http://localhost:5000/api';
-
-// Function to initialize the API with the correct base URL
-export const initializeApi = (apiConfig) => {
-  if (apiConfig && apiConfig.baseUrl) {
-    API_BASE_URL = `${apiConfig.baseUrl}/api`;
-    console.log('API initialized with base URL:', API_BASE_URL);
-  }
-};
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
 // Helper function for API requests
 const fetchWithErrorHandling = async (url, options = {}) => {
@@ -43,7 +34,6 @@ export const apiPost = (endpoint, data) => {
 };
 
 export default {
-  initializeApi,
   apiGet,
   apiPost
 };
