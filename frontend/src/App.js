@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Header from './components/Header';
-import Dashboard from './components/Dashboard';
+import Dashboard from './components/Dashboard'; // This imports from components/Dashboard/index.js
 import TransactionsList from './components/TransactionsList';
 import './styles.css';
 
@@ -15,7 +15,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Replace with your actual API endpoint
+  // Keep your original API URL exactly as it was
   const API_URL = 'https://msp-sap-api2-h5dmf6e6d4fngcbf.germanywestcentral-01.azurewebsites.net/';
 
   useEffect(() => {
@@ -51,13 +51,15 @@ function App() {
         <div className="error">Error: {error}</div>
       ) : (
         <>
+          {/* This is the modular Dashboard component */}
           <Dashboard 
-  stats={apiData.transaction_stats} 
-  budgetData={apiData.budget_allocation} 
-  awaitingAssignment={apiData.awaiting_assignment}
-  apiUrl={API_URL}  // Add this line
-/>
+            stats={apiData.transaction_stats} 
+            budgetData={apiData.budget_allocation} 
+            awaitingAssignment={apiData.awaiting_assignment}
+            apiUrl={API_URL}
+          />
           
+          {/* Keep your existing TransactionsList component */}
           <TransactionsList 
             awaitingAssignment={apiData.awaiting_assignment}
             apiUrl={API_URL} 
