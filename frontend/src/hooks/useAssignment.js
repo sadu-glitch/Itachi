@@ -34,11 +34,24 @@ export const useAssignment = (baseApiUrl, onSuccess) => {
         ? baseApiUrl.slice(0, -1) 
         : baseApiUrl;
       
+      console.log('Submitting assignment request to:', `${normalizedApiUrl}/api/assign-measure`);
+      console.log('Request body:', JSON.stringify({
+        bestellnummer: bestellnummer || assignmentForm.bestellnummer,
+        region: assignmentForm.region,
+        district: assignmentForm.district
+      }));
+      
+      // Use fetch with explicit OPTIONS handling for CORS
       const response = await fetch(`${normalizedApiUrl}/api/assign-measure`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
         },
+        // Add mode for cross-origin requests
+        mode: 'cors',
+        // Add credentials if your API requires them
+        credentials: 'same-origin',
         body: JSON.stringify({
           bestellnummer: bestellnummer || assignmentForm.bestellnummer,
           region: assignmentForm.region,
@@ -47,8 +60,13 @@ export const useAssignment = (baseApiUrl, onSuccess) => {
       });
       
       if (!response.ok) {
-        throw new Error(`Network response was not ok: ${response.status} ${response.statusText}`);
+        console.error('Error response:', response.status, response.statusText);
+        throw new Error(`Network error: ${response.status} ${response.statusText}`);
       }
+      
+      // Optionally log the response
+      const responseData = await response.json();
+      console.log('Assignment successful:', responseData);
       
       // Reset form
       setAssignmentForm({
