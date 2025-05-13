@@ -29,7 +29,12 @@ export const useAssignment = (baseApiUrl, onSuccess) => {
       setLoading(true);
       setError(null);
       
-      const response = await fetch(`${baseApiUrl}/api/assign-measure`, {
+      // Remove trailing slash from baseApiUrl if it exists to prevent double slashes
+      const normalizedApiUrl = baseApiUrl.endsWith('/') 
+        ? baseApiUrl.slice(0, -1) 
+        : baseApiUrl;
+      
+      const response = await fetch(`${normalizedApiUrl}/api/assign-measure`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -42,7 +47,7 @@ export const useAssignment = (baseApiUrl, onSuccess) => {
       });
       
       if (!response.ok) {
-        throw new Error('Network response was not ok');
+        throw new Error(`Network response was not ok: ${response.status} ${response.statusText}`);
       }
       
       // Reset form
@@ -61,6 +66,7 @@ export const useAssignment = (baseApiUrl, onSuccess) => {
       
       return true;
     } catch (err) {
+      console.error('Assignment error:', err);
       setError(err.message);
       setLoading(false);
       return false;
