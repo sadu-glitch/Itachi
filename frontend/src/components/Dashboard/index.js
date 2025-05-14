@@ -32,6 +32,7 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
   
   // Fetch all transactions for Excel export
   const [allTransactions, setAllTransactions] = useState([]);
+  const [loadingAllTransactions, setLoadingAllTransactions] = useState(false);
   
   // Fetch transactions when department or region changes
   const {
@@ -113,6 +114,9 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
 
   return (
     <div className="dashboard">
+      {/* Loading indicator for transactions */}
+      {loadingAllTransactions && <div className="loading">Loading all transactions...</div>}
+      
       <div className="dashboard-header">
         <h2 className="dashboard-title">Dashboard Overview mit Excel</h2>
         
