@@ -115,7 +115,7 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
   return (
     <div className="dashboard">
       <div className="dashboard-header">
-        <h2 className="dashboard-title">Dashboard Overview</h2>
+        <h2 className="dashboard-title">Dashboard Overview mit Excel</h2>
         
         {/* Excel Export Button - only show in main view */}
         {!selectedDepartment && departmentsData.departments && regionsData.regions && allTransactions.length > 0 && (
