@@ -77,7 +77,8 @@ const ExcelExportButton = ({ departments, regions, transactions }) => {
           '',
           '',
           '',
-          ''
+          '',
+          ''  // Add empty cell for new column
         ]);
         
         departmentData.push([
@@ -91,7 +92,7 @@ const ExcelExportButton = ({ departments, regions, transactions }) => {
           parseFloat(department.reserved_amount || 0).toFixed(2) + ' €'
         ]);
         
-        departmentData.push(['', '', '', '', '', '']);
+        departmentData.push(['', '', '', '', '', '', '']);  // Add empty cell for new column
         
         // Group by regions
         departmentRegionNames.forEach(regionName => {
@@ -119,7 +120,8 @@ const ExcelExportButton = ({ departments, regions, transactions }) => {
               '',
               '',
               '',
-              ''
+              '',
+              ''  // Add empty cell for new column
             ]);
             
             // Add region totals
@@ -141,7 +143,8 @@ const ExcelExportButton = ({ departments, regions, transactions }) => {
               'Datum',
               'Betrag (€)',
               'Status',
-              'Bezirk'
+              'Bezirk',
+              'Beschreibung'  // Add new header for text field
             ]);
             
             // Sort transactions by type (Direct, Booked, Parked)
@@ -168,12 +171,13 @@ const ExcelExportButton = ({ departments, regions, transactions }) => {
                 tx.booking_date || tx.measure_date || '',
                 parseFloat(tx.amount || tx.actual_amount || tx.estimated_amount || 0).toFixed(2),
                 tx.status || '',
-                tx.district || ''
+                tx.district || '',
+                tx.text || ''  // Add text field from transaction
               ]);
             });
             
             // Add empty row after region
-            departmentData.push(['', '', '', '', '', '']);
+            departmentData.push(['', '', '', '', '', '', '']);  // Add empty cell for new column
           }
         });
         
@@ -187,7 +191,8 @@ const ExcelExportButton = ({ departments, regions, transactions }) => {
           { wch: 12 },  // Datum
           { wch: 12 },  // Betrag
           { wch: 25 },  // Status
-          { wch: 15 }   // Bezirk
+          { wch: 15 },  // Bezirk
+          { wch: 40 }   // Beschreibung - wider column for text description
         ];
         worksheet['!cols'] = wscols;
         
@@ -197,7 +202,6 @@ const ExcelExportButton = ({ departments, regions, transactions }) => {
         let sheetName = department.name;
         
         // Remove any special characters that Excel doesn't like in sheet names
-        // Fix: Properly escape the regular expression
         sheetName = sheetName.replace(/[/\\*[\]?]/g, '');
         
         // Truncate if necessary
