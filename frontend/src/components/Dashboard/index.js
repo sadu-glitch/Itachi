@@ -35,6 +35,7 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
   const [loadingAllTransactions, setLoadingAllTransactions] = useState(false);
   
   // Fetch transactions when department or region changes
+  // eslint-disable-next-line no-unused-vars
   const {
     transactions,
     loading: transactionsLoading,
