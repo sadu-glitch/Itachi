@@ -38,7 +38,6 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
   // eslint-disable-next-line no-unused-vars
   const {
     transactions,
-    loading: transactionsLoading,
     error: transactionsError,
     fetchTransactions
   } = useTransactionData(baseApiUrl, selectedDepartment, selectedRegion);
