@@ -198,7 +198,7 @@ const ExcelExportButton = ({ departments, regions, transactions }) => {
         
         // Remove any special characters that Excel doesn't like in sheet names
         // Fix: Properly escape the regular expression
-        sheetName = sheetName.replace(/[/\\*\[\]?]/g, '');
+        sheetName = sheetName.replace(/[/\\*[\]?]/g, '');
         
         // Truncate if necessary
         if (sheetName.length > maxLength) {
