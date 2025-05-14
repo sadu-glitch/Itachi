@@ -5,10 +5,10 @@ import DepartmentOverview from './DepartmentOverview';
 import DepartmentDetail from './DepartmentDetail';
 import RegionDetail from './RegionDetail';
 import TransactionDetail from './TransactionDetail';
-import ExcelExportButton from './ExcelExportButton'; // Import the new component
 import { useDepartmentData } from '../../hooks/useDepartmentData';
 import { useTransactionData } from '../../hooks/useTransactionData';
-import '../../styles/excel-export.css'; // Import the styling
+import ExcelExportButton from '../ExcelExportButton'; // Import the ExcelExportButton component
+import '../../styles/excel-export.css'; // Import the export button styles
 
 // Main Dashboard component that orchestrates the overall structure
 const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {

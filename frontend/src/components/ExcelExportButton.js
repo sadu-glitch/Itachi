@@ -119,7 +119,7 @@ const ExcelExportButton = ({ departments, regions, transactions }) => {
               'BOOKED_MEASURE': 2,
               'PARKED_MEASURE': 3
             };
-            return typeOrder[a.category] - typeOrder[b.category];
+            return (typeOrder[a.category] || 99) - (typeOrder[b.category] || 99);
           });
           
           // Add transactions
