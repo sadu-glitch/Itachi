@@ -5,8 +5,10 @@ import DepartmentOverview from './DepartmentOverview';
 import DepartmentDetail from './DepartmentDetail';
 import RegionDetail from './RegionDetail';
 import TransactionDetail from './TransactionDetail';
+import ExcelExportButton from './ExcelExportButton'; // Import the new component
 import { useDepartmentData } from '../../hooks/useDepartmentData';
 import { useTransactionData } from '../../hooks/useTransactionData';
+import '../../styles/excel-export.css'; // Import the styling
 
 // Main Dashboard component that orchestrates the overall structure
 const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
@@ -28,6 +30,10 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
     refreshDepartmentData
   } = useDepartmentData(baseApiUrl);
   
+  // Fetch all transactions for Excel export
+  const [allTransactions, setAllTransactions] = useState([]);
+  const [loadingAllTransactions, setLoadingAllTransactions] = useState(false);
+  
   // Fetch transactions when department or region changes
   const {
     transactions,
@@ -41,6 +47,34 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
     if (departmentsError) setError(departmentsError);
     if (transactionsError) setError(transactionsError);
   }, [departmentsError, transactionsError]);
+  
+  // Fetch all transactions for Excel export when component mounts
+  useEffect(() => {
+    const fetchAllTransactions = async () => {
+      try {
+        setLoadingAllTransactions(true);
+        // Remove trailing slash from baseApiUrl if it exists
+        const normalizedApiUrl = baseApiUrl.endsWith('/') 
+          ? baseApiUrl.slice(0, -1) 
+          : baseApiUrl;
+          
+        const response = await fetch(`${normalizedApiUrl}/api/transactions`);
+        
+        if (!response.ok) {
+          throw new Error('Failed to fetch all transactions');
+        }
+        
+        const data = await response.json();
+        setAllTransactions(data.transactions || []);
+        setLoadingAllTransactions(false);
+      } catch (err) {
+        console.error('Error fetching all transactions:', err);
+        setLoadingAllTransactions(false);
+      }
+    };
+    
+    fetchAllTransactions();
+  }, [baseApiUrl]);
   
   // Handle department selection
   const handleDepartmentClick = (department) => {
@@ -78,23 +112,20 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
     return <div className="error">Error: {error}</div>;
   }
 
-  // Extract departments
-  const departments = departmentsData.departments || [];
-  
-  // Get parked measures for selected department ONLY when a department is selected
-  // This should NEVER be shown on the main dashboard view
-  const parkedMeasures = selectedDepartment && awaitingAssignment 
-    ? (awaitingAssignment[selectedDepartment] || [])
-    : [];
-
-  // Filter regions for selected department
-  const departmentRegions = selectedDepartment 
-    ? (regionsData.regions || []).filter(region => region.department === selectedDepartment)
-    : [];
-
   return (
     <div className="dashboard">
-      <h2>Dashboard Overview</h2>
+      <div className="dashboard-header">
+        <h2 className="dashboard-title">Dashboard Overview</h2>
+        
+        {/* Excel Export Button - only show in main view */}
+        {!selectedDepartment && departmentsData.departments && regionsData.regions && allTransactions.length > 0 && (
+          <ExcelExportButton 
+            departments={departmentsData.departments || []} 
+            regions={regionsData.regions || []}
+            transactions={allTransactions}
+          />
+        )}
+      </div>
       
       {/* Statistics Cards */}
       <StatisticsCards stats={stats} />
@@ -104,26 +135,26 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
         <>
           {/* Budget Setting Form - only shown in main view */}
           <BudgetAllocationForm 
-            departments={departments} 
+            departments={departmentsData.departments || []} 
             baseApiUrl={baseApiUrl} 
             onSuccess={refreshDepartmentData}
           />
           
           {/* Department Overview */}
           <DepartmentOverview 
-            departments={departments} 
+            departments={departmentsData.departments || []} 
             onDepartmentClick={handleDepartmentClick} 
           />
         </>
       )}
       
-      {/* Department Detail View - only show this when a department is selected */}
+      {/* Department Detail View */}
       {selectedDepartment && !selectedRegion && (
         <DepartmentDetail 
           selectedDepartment={selectedDepartment}
-          regions={departmentRegions}
+          regions={regionsData.regions?.filter(region => region.department === selectedDepartment) || []}
           transactions={transactions.transactions || []}
-          parkedMeasures={parkedMeasures} // Only pass parked measures for this specific department
+          parkedMeasures={awaitingAssignment?.[selectedDepartment] || []}
           onRegionClick={handleRegionClick}
           onTransactionClick={handleTransactionClick}
           onBackClick={() => setSelectedDepartment(null)}
@@ -147,7 +178,7 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
       {selectedTransaction && (
         <TransactionDetail 
           transaction={selectedTransaction}
-          regions={departmentRegions}
+          regions={regionsData.regions?.filter(region => region.department === selectedDepartment) || []}
           onClose={() => setSelectedTransaction(null)}
           onAssignmentSuccess={handleAssignmentSuccess}
           baseApiUrl={baseApiUrl}
