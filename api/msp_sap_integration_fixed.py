@@ -447,11 +447,12 @@ def process_sap_batch(
     for _, transaction in batch.iterrows():
         # Extract and process Kostenstelle
         kostenstelle = str(safe_get(transaction, 'Kostenstelle', ''))
-        location_info = map_kostenstelle_cached(kostenstelle, mapping_index)
+        location_result = map_kostenstelle_cached(kostenstelle, mapping_index)
         
-        if location_info is None:
+        if location_result is None:
             # Could not map Kostenstelle to location - create default LocationInfo
             location_info = LocationInfo('', '', '')
+            location_type = 'Unknown'  # New field for location type
             
             outliers.append({
                 'transaction_id': str(safe_get(transaction, 'Belegnummer', '')),
@@ -464,9 +465,13 @@ def process_sap_batch(
                 'budget_impact': 'None',
                 'department': '',
                 'region': '',
-                'district': ''
+                'district': '',
+                'location_type': location_type  # Add the location type field
             })
             continue
+        
+        # Unpack the location result tuple
+        location_info, location_type = location_result
         
         # Extract Bestellnummer from Text field
         text_field = str(safe_get(transaction, 'Text', ''))
@@ -484,7 +489,8 @@ def process_sap_batch(
                 'budget_impact': 'Booked',
                 'department': location_info.department or '',
                 'region': location_info.region or '',
-                'district': location_info.district or ''
+                'district': location_info.district or '',
+                'location_type': location_type  # Add the location type field
             })
             continue
         
@@ -503,7 +509,8 @@ def process_sap_batch(
                 'budget_impact': 'Booked',
                 'department': location_info.department or '',
                 'region': location_info.region or '',
-                'district': location_info.district or ''
+                'district': location_info.district or '',
+                'location_type': location_type  # Add the location type field
             })
             continue
         
@@ -539,6 +546,7 @@ def process_sap_batch(
             'department': location_info.department or '',
             'region': location_info.region or '',
             'district': location_info.district or '',
+            'location_type': location_type,  # Add the location type field
             'msp_data': measure_data,
             'sap_data': transaction_data
         })
@@ -549,6 +557,7 @@ def process_sap_batch(
         'outliers': outliers,
         'matched_bestellnummern': matched_bestellnummern
     }
+
 def process_parked_measures(
     msp_data: pd.DataFrame, 
     matched_bestellnummern: Set[int],
@@ -569,12 +578,26 @@ def process_parked_measures(
             # This measure has no matching SAP transaction yet
             # Check if it was previously parked and has manual assignment
             manual_assignment = None
-            if bestellnummer in previous_parked_index and 'manual_assignment' in previous_parked_index[bestellnummer]:
-                manual_assignment = previous_parked_index[bestellnummer]['manual_assignment']
+            previous_location_type = None
+            
+            if bestellnummer in previous_parked_index:
+                if 'manual_assignment' in previous_parked_index[bestellnummer]:
+                    manual_assignment = previous_parked_index[bestellnummer]['manual_assignment']
+                # Get the location_type from previous data if available
+                if 'location_type' in previous_parked_index[bestellnummer]:
+                    previous_location_type = previous_parked_index[bestellnummer]['location_type']
             
             # Extract department from Gruppen field
             gruppen = safe_get(measure, 'Gruppen', '')
             department = extract_department_from_gruppen_cached(gruppen)
+            
+            # Determine location type based on previous data or department name
+            if previous_location_type:
+                location_type = previous_location_type
+            else:
+                # Infer location type from department name
+                # You may need to customize this based on your specific department naming convention
+                location_type = infer_location_type_from_department(department)
             
             # Use safe conversion for estimated amount
             estimated_amount = safe_float_conversion(safe_get(measure, 'Benötigtes Budget (Geschätzt)', 0))
@@ -595,6 +618,7 @@ def process_parked_measures(
                 'department': department,
                 'region': manual_assignment.get('region', '') if manual_assignment else '',
                 'district': manual_assignment.get('district', '') if manual_assignment else '',
+                'location_type': location_type,  # Add the location type field
                 'manual_assignment': manual_assignment,
                 'msp_data': measure_data
             }
@@ -602,6 +626,44 @@ def process_parked_measures(
             parked_measures.append(parked_measure)
     
     return parked_measures
+
+def infer_location_type_from_department(department: str) -> str:
+    """
+    Infer the location type (Floor or HQ) from department name
+    """
+    if not department:
+        return 'Unknown'
+        
+    # Department names that indicate Floor departments
+    # This is just an example, you'll need to customize this based on your actual department names
+    floor_department_indicators = [
+        'Abteilung Baden-Württemberg',
+        'Abteilung Schleswig-Holstein',
+        'Abteilung Mecklenburg-Vorpommern',
+        'Abteilung Nordrhein-Westfalen',
+        'Abteilung Sachsen-Anhalt',
+        'Abteilung Hessen',
+        'Abteilung Bayern',
+        'BW',
+        'SH',
+        'MV',
+        'NRW',
+        'ST',
+        'HE',
+        'BY'
+    ]
+    
+    # Check if any of the floor department indicators are in the department name
+    for indicator in floor_department_indicators:
+        if indicator in department:
+            return 'Floor'
+    
+    # If it contains 'HV' or 'Hauptverwaltung', it's HQ
+    if 'HV' in department or 'Hauptverwaltung' in department:
+        return 'HQ'
+    
+    # Default to Unknown if we can't determine
+    return 'Unknown'
 
 # -----------------------------------------------------------------------------
 # Cached helper functions
@@ -630,9 +692,10 @@ def extract_bestellnummer_cached(text_field: str) -> Optional[int]:
     bestellnummer_cache.set(text_field, result)
     return result
 
-def map_kostenstelle_cached(kostenstelle: str, mapping_index: Dict[str, LocationInfo]) -> Optional[LocationInfo]:
+def map_kostenstelle_cached(kostenstelle: str, mapping_index: Dict[str, LocationInfo]) -> Optional[Tuple[LocationInfo, str]]:
     """
     Map Kostenstelle to location information with caching
+    Returns a tuple of (LocationInfo, location_type) where location_type is 'Floor' or 'HQ'
     """
     # Check cache first
     cached_result = kostenstelle_cache.get(kostenstelle)
@@ -649,13 +712,16 @@ def map_kostenstelle_cached(kostenstelle: str, mapping_index: Dict[str, Location
     if '.' in kostenstelle:
         kostenstelle = kostenstelle.split('.')[0]
     
-    # Ensure we have at least 5 digits for Floor
+    # Ensure we have at least 5 digits
     if len(kostenstelle) < 5:
         return None
+    
+    location_type = None  # Will be set to 'Floor' or 'HQ'
     
     if kostenstelle.startswith('1'):
         # HQ Kostenstelle - use full 8-digit number
         result = mapping_index.get(kostenstelle)
+        location_type = 'HQ'
     
     elif kostenstelle.startswith('3'):
         # Floor Kostenstelle - extract digits 2-6 (to get the 5 digits after the leading '3')
@@ -679,13 +745,19 @@ def map_kostenstelle_cached(kostenstelle: str, mapping_index: Dict[str, Location
             result = mapping_index.get(stripped_digits)
             if result is None:
                 result = mapping_index.get(f"FLOOR_{stripped_digits}")
+        
+        if result is not None:
+            location_type = 'Floor'
     
     else:
         result = None
     
+    # Prepare the result (both location info and type)
+    final_result = (result, location_type) if result is not None else None
+    
     # Cache the result
-    kostenstelle_cache.set(kostenstelle, result)
-    return result
+    kostenstelle_cache.set(kostenstelle, final_result)
+    return final_result
 
 def extract_department_from_gruppen_cached(gruppen_field: str) -> Optional[str]:
     """
@@ -855,7 +927,7 @@ def generate_frontend_views(processed_data: Dict) -> None:
     """
     start_time = time.time()
     
-    # 1. Department-level view
+    # 1. Department-level view with location type
     departments = {}
     
     for tx in processed_data['transactions']:
@@ -863,10 +935,17 @@ def generate_frontend_views(processed_data: Dict) -> None:
         dept = tx.get('department', '')
         if not dept:
             continue
+        
+        # Get location type with 'Unknown' fallback
+        location_type = tx.get('location_type', 'Unknown')
             
-        if dept not in departments:
-            departments[dept] = {
+        # The key now includes the department name and location type
+        dept_key = f"{dept}|{location_type}"
+        
+        if dept_key not in departments:
+            departments[dept_key] = {
                 'name': dept,
+                'location_type': location_type,  # Add the location type
                 'booked_amount': 0,
                 'reserved_amount': 0,
                 'regions': set()
@@ -875,23 +954,23 @@ def generate_frontend_views(processed_data: Dict) -> None:
         # Add to appropriate budget category
         if tx.get('budget_impact') == 'Booked':
             amount_val = tx.get('amount', 0) or tx.get('actual_amount', 0)
-            departments[dept]['booked_amount'] += safe_float_conversion(amount_val)
+            departments[dept_key]['booked_amount'] += safe_float_conversion(amount_val)
         elif tx.get('budget_impact') == 'Reserved':
-            departments[dept]['reserved_amount'] += safe_float_conversion(tx.get('estimated_amount', 0))
+            departments[dept_key]['reserved_amount'] += safe_float_conversion(tx.get('estimated_amount', 0))
             
         # Track regions - skip empty region values
         region = tx.get('region', '')
         if region:
-            departments[dept]['regions'].add(region)
+            departments[dept_key]['regions'].add(region)
     
     # Convert to list and finalize
     departments_list = []
-    for dept_name, dept_data in departments.items():
+    for dept_key, dept_data in departments.items():
         dept_data['regions'] = list(dept_data['regions'])
         dept_data['total_amount'] = dept_data['booked_amount'] + dept_data['reserved_amount']
         departments_list.append(dept_data)
     
-    # 2. Region-level view
+    # 2. Region-level view with location type
     regions = {}
     
     for tx in processed_data['transactions']:
@@ -901,12 +980,18 @@ def generate_frontend_views(processed_data: Dict) -> None:
         
         if not region or not dept:
             continue
+        
+        # Get location type with 'Unknown' fallback
+        location_type = tx.get('location_type', 'Unknown')
             
-        region_key = f"{dept}|{region}"
+        # The key now includes the department, region, and location type
+        region_key = f"{dept}|{region}|{location_type}"
+        
         if region_key not in regions:
             regions[region_key] = {
                 'department': dept,
                 'name': region,
+                'location_type': location_type,  # Add the location type
                 'booked_amount': 0,
                 'reserved_amount': 0,
                 'districts': set()
@@ -931,7 +1016,7 @@ def generate_frontend_views(processed_data: Dict) -> None:
         region_data['total_amount'] = region_data['booked_amount'] + region_data['reserved_amount']
         regions_list.append(region_data)
     
-    # 3. Awaiting assignment view (parked measures grouped by department)
+    # 3. Awaiting assignment view (parked measures grouped by department and location type)
     awaiting_assignment = {}
     
     for measure in processed_data['parked_measures']:
@@ -940,12 +1025,17 @@ def generate_frontend_views(processed_data: Dict) -> None:
             
         # Get department with empty string fallback
         dept = measure.get('department', '')
+        location_type = measure.get('location_type', 'Unknown')  # Get location type
+        
         if not dept:
             # If no department, put in 'Unassigned' category
             dept = 'Unassigned'
+        
+        # Create a combined key for department and location type
+        dept_key = f"{dept}|{location_type}"
             
-        if dept not in awaiting_assignment:
-            awaiting_assignment[dept] = []
+        if dept_key not in awaiting_assignment:
+            awaiting_assignment[dept_key] = []
             
         # Create a safe version of the measure data
         safe_measure = {
@@ -955,10 +1045,11 @@ def generate_frontend_views(processed_data: Dict) -> None:
             'estimated_amount': safe_float_conversion(measure.get('estimated_amount', 0)),
             'measure_date': measure.get('measure_date', ''),
             'department': dept,
+            'location_type': location_type,  # Add the location type
             'name': measure.get('name', '')  # Empty string as fallback
         }
             
-        awaiting_assignment[dept].append(safe_measure)
+        awaiting_assignment[dept_key].append(safe_measure)
     
     # Save the views to blob storage in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
@@ -974,22 +1065,28 @@ def generate_frontend_views(processed_data: Dict) -> None:
     }
     
     for dept in departments_list:
-        budget_allocation['departments'][dept['name']] = {
-            'allocated_budget': 0  # To be set by admin
+        # Include location_type in the key
+        dept_key = f"{dept['name']}|{dept['location_type']}"
+        budget_allocation['departments'][dept_key] = {
+            'allocated_budget': 0,  # To be set by admin
+            'location_type': dept['location_type']  # Add location type
         }
         
     for region in regions_list:
-        budget_allocation['regions'][f"{region['department']}|{region['name']}"] = {
-            'allocated_budget': 0  # To be set by admin
+        # Include location_type in the key
+        region_key = f"{region['department']}|{region['name']}|{region['location_type']}"
+        budget_allocation['regions'][region_key] = {
+            'allocated_budget': 0,  # To be set by admin
+            'location_type': region['location_type']  # Add location type
         }
     
     # Try to read existing budget allocation
     try:
         existing_budget = read_from_blob("processed-data", "budget_allocation.json", as_json=True)
         # Merge with initialized structure
-        for dept_name, dept_data in existing_budget.get('departments', {}).items():
-            if dept_name in budget_allocation['departments']:
-                budget_allocation['departments'][dept_name] = dept_data
+        for dept_key, dept_data in existing_budget.get('departments', {}).items():
+            if dept_key in budget_allocation['departments']:
+                budget_allocation['departments'][dept_key] = dept_data
                 
         for region_key, region_data in existing_budget.get('regions', {}).items():
             if region_key in budget_allocation['regions']:
@@ -1001,9 +1098,3 @@ def generate_frontend_views(processed_data: Dict) -> None:
     
     elapsed_time = time.time() - start_time
     logger.info(f"Generated frontend views in {elapsed_time:.2f} seconds")
-# -----------------------------------------------------------------------------
-# Main script execution
-# -----------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    main()
