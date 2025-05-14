@@ -16,16 +16,27 @@ const ExcelExportButton = ({ departments, regions, transactions }) => {
     return dept.location_type === 'Floor';
   };
 
-  const floorDepartments = departments.filter(isFloorDepartment);
-
   // Generate Excel file when button is clicked
   const generateExcel = () => {
     try {
+      console.log("Starting Excel generation...");
+      console.log("Departments:", departments);
+      console.log("Regions:", regions);
+      console.log("Transactions count:", transactions.length);
+      
+      // Filter floor departments to ensure we only have unique department names
+      const floorDepartments = departments.filter(isFloorDepartment);
+      const uniqueDepartments = Array.from(
+        new Map(floorDepartments.map(dept => [dept.name, dept])).values()
+      );
+      
+      console.log("Unique floor departments:", uniqueDepartments.map(d => d.name));
+      
       // Create a new workbook
       const workbook = XLSX.utils.book_new();
       
       // Create overview sheet for all departments
-      const overviewData = floorDepartments.map(dept => ({
+      const overviewData = uniqueDepartments.map(dept => ({
         'Abteilung': dept.name,
         'Gebuchter Betrag (€)': parseFloat(dept.booked_amount || 0).toFixed(2),
         'Reservierter Betrag (€)': parseFloat(dept.reserved_amount || 0).toFixed(2),
@@ -36,16 +47,25 @@ const ExcelExportButton = ({ departments, regions, transactions }) => {
       XLSX.utils.book_append_sheet(workbook, overviewSheet, 'Übersicht Abteilungen');
       
       // Generate a sheet for each floor department
-      floorDepartments.forEach(department => {
-        // Get regions for this department
-        const departmentRegions = regions.filter(region => 
-          region.department === department.name && region.location_type === 'Floor'
-        );
+      uniqueDepartments.forEach((department, index) => {
+        console.log(`Processing department: ${department.name}`);
         
-        // Get all transactions for this department
+        // Get all transactions for this department (floor only)
         const departmentTransactions = transactions.filter(tx => 
           tx.department === department.name && tx.location_type === 'Floor'
         );
+        
+        console.log(`Found ${departmentTransactions.length} transactions for department`);
+        
+        // Get unique regions for this department
+        const departmentRegionNames = [...new Set(departmentTransactions.map(tx => tx.region))].filter(Boolean);
+        const departmentRegions = regions.filter(r => 
+          r.department === department.name && 
+          r.location_type === 'Floor' && 
+          departmentRegionNames.includes(r.name)
+        );
+        
+        console.log(`Found ${departmentRegions.length} regions for department`);
         
         // Prepare data for this department's sheet
         const departmentData = [];
@@ -74,74 +94,87 @@ const ExcelExportButton = ({ departments, regions, transactions }) => {
         departmentData.push(['', '', '', '', '', '']);
         
         // Group by regions
-        departmentRegions.forEach(region => {
-          // Add region header
-          departmentData.push([
-            `Region: ${region.name}`,
-            '',
-            '',
-            '',
-            '',
-            ''
-          ]);
+        departmentRegionNames.forEach(regionName => {
+          console.log(`Processing region: ${regionName}`);
           
-          // Add region totals
-          departmentData.push([
-            'Gesamtbetrag Region:',
-            parseFloat(region.total_amount || 0).toFixed(2) + ' €',
-            '',
-            'Gebuchter Betrag:',
-            parseFloat(region.booked_amount || 0).toFixed(2) + ' €',
-            '',
-            'Reservierter Betrag:',
-            parseFloat(region.reserved_amount || 0).toFixed(2) + ' €'
-          ]);
-          
-          // Add table headers for transactions
-          departmentData.push([
-            'Bestellnummer',
-            'Typ',
-            'Datum',
-            'Betrag (€)',
-            'Status',
-            'Bezirk'
-          ]);
+          // Find region data
+          const regionData = departmentRegions.find(r => r.name === regionName) || {
+            name: regionName,
+            booked_amount: 0,
+            reserved_amount: 0,
+            total_amount: 0
+          };
           
           // Get transactions for this region
-          const regionTransactions = departmentTransactions.filter(tx => 
-            tx.region === region.name
-          );
+          const regionTransactions = departmentTransactions.filter(tx => tx.region === regionName);
           
-          // Sort transactions by type (Direct, Booked, Parked)
-          const sortedTransactions = [...regionTransactions].sort((a, b) => {
-            const typeOrder = {
-              'DIRECT_COST': 1,
-              'BOOKED_MEASURE': 2,
-              'PARKED_MEASURE': 3
-            };
-            return (typeOrder[a.category] || 99) - (typeOrder[b.category] || 99);
-          });
+          console.log(`Found ${regionTransactions.length} transactions for region`);
           
-          // Add transactions
-          sortedTransactions.forEach(tx => {
-            const txType = tx.category === 'DIRECT_COST' 
-              ? 'Direkte Kosten' 
-              : tx.category === 'BOOKED_MEASURE' 
-                ? 'SAP-MSP Gebucht' 
-                : 'Parkend (Warte auf SAP)';
-                
+          // Only include regions with transactions
+          if (regionTransactions.length > 0) {
+            // Add region header
             departmentData.push([
-              tx.bestellnummer || tx.transaction_id || tx.measure_id || '',
-              txType,
-              tx.booking_date || tx.measure_date || '',
-              parseFloat(tx.amount || tx.actual_amount || tx.estimated_amount || 0).toFixed(2),
-              tx.status || '',
-              tx.district || ''
+              `Region: ${regionName}`,
+              '',
+              '',
+              '',
+              '',
+              ''
             ]);
-          });
-          
-          // Add empty row after region
-          departmentData.push(['', '', '', '', '', '']);
+            
+            // Add region totals
+            departmentData.push([
+              'Gesamtbetrag Region:',
+              parseFloat(regionData.total_amount || 0).toFixed(2) + ' €',
+              '',
+              'Gebuchter Betrag:',
+              parseFloat(regionData.booked_amount || 0).toFixed(2) + ' €',
+              '',
+              'Reservierter Betrag:',
+              parseFloat(regionData.reserved_amount || 0).toFixed(2) + ' €'
+            ]);
+            
+            // Add table headers for transactions
+            departmentData.push([
+              'Bestellnummer',
+              'Typ',
+              'Datum',
+              'Betrag (€)',
+              'Status',
+              'Bezirk'
+            ]);
+            
+            // Sort transactions by type (Direct, Booked, Parked)
+            const sortedTransactions = [...regionTransactions].sort((a, b) => {
+              const typeOrder = {
+                'DIRECT_COST': 1,
+                'BOOKED_MEASURE': 2,
+                'PARKED_MEASURE': 3
+              };
+              return (typeOrder[a.category] || 99) - (typeOrder[b.category] || 99);
+            });
+            
+            // Add transactions
+            sortedTransactions.forEach(tx => {
+              const txType = tx.category === 'DIRECT_COST' 
+                ? 'Direkte Kosten' 
+                : tx.category === 'BOOKED_MEASURE' 
+                  ? 'SAP-MSP Gebucht' 
+                  : 'Parkend (Warte auf SAP)';
+                  
+              departmentData.push([
+                tx.bestellnummer || tx.transaction_id || tx.measure_id || '',
+                txType,
+                tx.booking_date || tx.measure_date || '',
+                parseFloat(tx.amount || tx.actual_amount || tx.estimated_amount || 0).toFixed(2),
+                tx.status || '',
+                tx.district || ''
+              ]);
+            });
+            
+            // Add empty row after region
+            departmentData.push(['', '', '', '', '', '']);
+          }
         });
         
         // Create worksheet from array data
@@ -158,12 +191,46 @@ const ExcelExportButton = ({ departments, regions, transactions }) => {
         ];
         worksheet['!cols'] = wscols;
         
-        // Add worksheet to workbook (name limited to 31 chars)
-        const sheetName = department.name.length > 28 
-          ? department.name.substring(0, 28) + '...'
-          : department.name;
+        // Create a safe sheet name - Excel limits sheet names to 31 characters
+        // and doesn't allow certain characters
+        const maxLength = 31;
+        let sheetName = department.name;
+        
+        // Remove any special characters that Excel doesn't like in sheet names
+        sheetName = sheetName.replace(/[\\\/\*\[\]\?]/g, '');
+        
+        // Truncate if necessary
+        if (sheetName.length > maxLength) {
+          // Try to truncate at a word boundary if possible
+          const parts = sheetName.split(' ');
+          let result = '';
           
-        XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+          for (const part of parts) {
+            if ((result + part).length <= maxLength - 3) {
+              result += (result ? ' ' : '') + part;
+            } else {
+              break;
+            }
+          }
+          
+          sheetName = result + '...';
+          
+          // If still too long, just truncate
+          if (sheetName.length > maxLength) {
+            sheetName = sheetName.substring(0, maxLength - 3) + '...';
+          }
+        }
+        
+        console.log(`Adding worksheet with name: ${sheetName}`);
+        
+        // Add worksheet to workbook
+        try {
+          XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+        } catch (err) {
+          console.error(`Error adding sheet "${sheetName}":`, err);
+          // If this fails, try with a generic name
+          XLSX.utils.book_append_sheet(workbook, worksheet, `Abteilung ${index + 1}`);
+        }
       });
       
       // Generate Excel file and trigger download
@@ -176,9 +243,10 @@ const ExcelExportButton = ({ departments, regions, transactions }) => {
       const fileName = `Abteilungen_Finanzübersicht_${dateStr}.xlsx`;
       
       saveAs(blob, fileName);
+      console.log("Excel file generated successfully");
     } catch (error) {
       console.error('Error generating Excel file:', error);
-      alert('Fehler beim Erstellen der Excel-Datei. Bitte versuchen Sie es erneut.');
+      alert('Fehler beim Erstellen der Excel-Datei: ' + error.message);
     }
   };
 
