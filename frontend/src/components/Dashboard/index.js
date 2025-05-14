@@ -32,7 +32,6 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
   
   // Fetch all transactions for Excel export
   const [allTransactions, setAllTransactions] = useState([]);
-  const [loadingAllTransactions, setLoadingAllTransactions] = useState(false);
   
   // Fetch transactions when department or region changes
   const {

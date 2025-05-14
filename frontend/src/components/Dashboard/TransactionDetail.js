@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { useAssignment } from '../../hooks/useAssignment';
+// Remove useState if not used
+import React from 'react'; // Remove the { useState } part
+import { useAssignment } from '../../hooks/useAssignment'
 
 /**
  * Component to display transaction details in a modal

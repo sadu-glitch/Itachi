@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 /**
  * Custom hook to fetch and manage transaction data
@@ -12,7 +12,7 @@ export const useTransactionData = (baseApiUrl, department, region) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   
-  const fetchTransactions = async () => {
+  const fetchTransactions = useCallback(async () => {
     if (!department) {
       setTransactions({ transactions: [], total: 0 });
       return;
@@ -42,12 +42,12 @@ export const useTransactionData = (baseApiUrl, department, region) => {
       setLoading(false);
       throw err;
     }
-  };
+  }, [baseApiUrl, department, region]); // Add these dependencies
   
-  // Fetch transactions when department or region changes
+  // Fetch transactions when fetchTransactions changes
   useEffect(() => {
     fetchTransactions();
-  }, [department, region, baseApiUrl]);
+  }, [fetchTransactions]);
   
   return {
     transactions,

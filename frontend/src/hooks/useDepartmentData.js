@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 /**
  * Custom hook to fetch and manage department and region data
@@ -11,7 +11,8 @@ export const useDepartmentData = (baseApiUrl) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   
-  const fetchDepartmentData = async () => {
+  // Use useCallback to memoize the function
+  const fetchDepartmentData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -34,12 +35,12 @@ export const useDepartmentData = (baseApiUrl) => {
       setLoading(false);
       throw err;
     }
-  };
+  }, [baseApiUrl]); // Add baseApiUrl as a dependency of fetchDepartmentData
   
-  // Fetch data when the component mounts or the URL changes
+  // Fetch data when the component mounts or when fetchDepartmentData changes
   useEffect(() => {
     fetchDepartmentData();
-  }, [baseApiUrl]);
+  }, [fetchDepartmentData]);
   
   return {
     departmentsData,
