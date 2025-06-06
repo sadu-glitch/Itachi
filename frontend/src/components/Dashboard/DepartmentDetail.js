@@ -107,7 +107,7 @@ const DepartmentBudgetOverview = ({
             </div>
           </div>
           
-          {/* Enhanced Progress Bar */}
+          {/* Enhanced Progress Barrr */}
           <div className="budget-progress-container">
             <div className={`budget-progress-bar ${displayData.usagePercentage > 100 ? 'over-allocated' : ''}`}>
               <div className="budget-progress-segments">
