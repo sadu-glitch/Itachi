@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import StatisticsCards from './StatisticsCards';
 import BudgetAllocationForm from './BudgetAllocationForm';
 import DepartmentOverview from './DepartmentOverview';
 import DepartmentDetail from './DepartmentDetail';
@@ -7,14 +6,15 @@ import RegionDetail from './RegionDetail';
 import TransactionDetail from './TransactionDetail';
 import { useDepartmentData } from '../../hooks/useDepartmentData';
 import { useTransactionData } from '../../hooks/useTransactionData';
-import ExcelExportButton from '../ExcelExportButton'; // Import the ExcelExportButton component
-import '../../styles/excel-export.css'; // Import the export button styles
+import ExcelExportButton from '../ExcelExportButton';
+import '../../styles/excel-export.css';
 
 // Main Dashboard component that orchestrates the overall structure
 const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
   // State for navigation and selection
   const [selectedDepartment, setSelectedDepartment] = useState(null);
   const [selectedRegion, setSelectedRegion] = useState(null);
+  const [selectedRegionData, setSelectedRegionData] = useState(null); // Add this to store full region data
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [error, setError] = useState(null);
   
@@ -78,14 +78,18 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
   
   // Handle department selection
   const handleDepartmentClick = (department) => {
-    setSelectedDepartment(department.name);
-    setSelectedRegion(null);
-    setSelectedTransaction(null);
-  };
+  console.log('🔍 DEBUG: Department clicked:', department);
+  console.log('🔍 DEBUG: Department name:', department.name);
+  setSelectedDepartment(department.name);
+  setSelectedRegion(null);
+  setSelectedRegionData(null);
+  setSelectedTransaction(null);
+};
 
-  // Handle region selection
+  // Handle region selection - UPDATED to accept full region object
   const handleRegionClick = (region) => {
     setSelectedRegion(region.name);
+    setSelectedRegionData(region); // Store the full region data including budget info
     setSelectedTransaction(null);
   };
 
@@ -100,6 +104,12 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
     if (selectedDepartment) {
       await fetchTransactions();
     }
+  };
+
+  // Handle back from region to department
+  const handleBackToDepartment = () => {
+    setSelectedRegion(null);
+    setSelectedRegionData(null); // Clear region data
   };
   
   // If loading, show loading message
@@ -130,9 +140,6 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
         )}
       </div>
       
-      {/* Statistics Cards */}
-      <StatisticsCards stats={stats} />
-      
       {/* Conditional rendering based on selection state */}
       {!selectedDepartment && (
         <>
@@ -145,35 +152,61 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
           
           {/* Department Overview */}
           <DepartmentOverview 
-            departments={departmentsData.departments || []} 
-            onDepartmentClick={handleDepartmentClick} 
-          />
+  departments={departmentsData.departments || []} 
+  onDepartmentClick={handleDepartmentClick} 
+  baseApiUrl={baseApiUrl}
+/>
         </>
       )}
       
-      {/* Department Detail View */}
-      {selectedDepartment && !selectedRegion && (
-        <DepartmentDetail 
-          selectedDepartment={selectedDepartment}
-          regions={regionsData.regions?.filter(region => region.department === selectedDepartment) || []}
-          transactions={transactions.transactions || []}
-          parkedMeasures={awaitingAssignment?.[selectedDepartment] || []}
-          onRegionClick={handleRegionClick}
-          onTransactionClick={handleTransactionClick}
-          onBackClick={() => setSelectedDepartment(null)}
-          onAssignmentSuccess={handleAssignmentSuccess}
-          baseApiUrl={baseApiUrl}
-        />
-      )}
+{/* Department Detail View */}
+{selectedDepartment && !selectedRegion && (() => {
+  // 🔍 DEBUG: Console logs go here, outside JSX
+  console.log('🔍 DEBUG: Selected Department:', selectedDepartment);
+  console.log('🔍 DEBUG: All Regions:', regionsData.regions);
+  console.log('🔍 DEBUG: Filtered Regions:', regionsData.regions?.filter(region => region.department === selectedDepartment));
+  
+  return (
+    <DepartmentDetail 
+      selectedDepartment={selectedDepartment}
+      regions={regionsData.regions?.filter(region => region.department === selectedDepartment) || []}
+      transactions={transactions.transactions || []}
+      parkedMeasures={(() => {
+        // Use transactions array instead of awaitingAssignment for complete data including msp_data
+        const allTransactions = transactions.transactions || [];
+        
+        // Filter parked measures that are awaiting assignment
+        const parkedMeasures = allTransactions.filter(tx => 
+          tx.department === selectedDepartment &&
+          tx.category === 'PARKED_MEASURE' &&
+          tx.status === 'Awaiting Assignment'
+        );
+        
+        console.log('🔍 DEBUG: Parked measures with msp_data:', parkedMeasures.length);
+        console.log('🔍 DEBUG: Sample parked measure msp_data:', parkedMeasures[0]?.msp_data);
+        
+        return parkedMeasures;
+      })()}
+      onRegionClick={handleRegionClick}
+      onTransactionClick={handleTransactionClick}
+      onBackClick={() => setSelectedDepartment(null)}
+      onAssignmentSuccess={handleAssignmentSuccess}
+      baseApiUrl={baseApiUrl}
+    />
+  );
+})()}
       
-      {/* Region Detail View */}
-      {selectedDepartment && selectedRegion && (
+      {/* Region Detail View - UPDATED with regionBudgetData */}
+      {selectedDepartment && selectedRegion && selectedRegionData && (
         <RegionDetail 
           selectedDepartment={selectedDepartment}
           selectedRegion={selectedRegion}
-          transactions={transactions.transactions || []}
+          transactions={transactions.transactions?.filter(tx => tx.region === selectedRegion) || []}
+          regionBudgetData={selectedRegionData.budgetData || selectedRegionData.calculatedAmounts} // Pass budget data
           onTransactionClick={handleTransactionClick}
-          onBackClick={() => setSelectedRegion(null)}
+          onBackClick={handleBackToDepartment} // Use updated handler
+          onAssignmentSuccess={handleAssignmentSuccess}
+          baseApiUrl={baseApiUrl}
         />
       )}
       

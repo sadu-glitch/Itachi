@@ -564,7 +564,7 @@ def process_parked_measures(
     previous_parked_index: Dict[int, Dict]
 ) -> List[Dict]:
     """
-    Process unmatched MSP measures with improved NaN handling
+    Process unmatched MSP measures with improved NaN handling and correct categorization
     """
     parked_measures = []
     
@@ -596,7 +596,6 @@ def process_parked_measures(
                 location_type = previous_location_type
             else:
                 # Infer location type from department name
-                # You may need to customize this based on your specific department naming convention
                 location_type = infer_location_type_from_department(department)
             
             # Use safe conversion for estimated amount
@@ -605,6 +604,18 @@ def process_parked_measures(
             # Create dictionary with safe handling for all fields
             measure_data = {k: None if pd.isna(v) else v for k, v in measure.to_dict().items()}
             
+            # FIXED: Determine correct category and status based on assignment
+            if manual_assignment:
+                category = 'PARKED_MEASURE'
+                status = 'Manually assigned, awaiting SAP'
+                region = manual_assignment.get('region', '')
+                district = manual_assignment.get('district', '')
+            else:
+                category = 'UNASSIGNED_MEASURE'  # ← NEW CATEGORY
+                status = 'Awaiting Assignment'
+                region = ''
+                district = ''
+            
             parked_measure = {
                 'measure_id': str(bestellnummer),
                 'bestellnummer': int(bestellnummer),
@@ -612,13 +623,13 @@ def process_parked_measures(
                 'estimated_amount': estimated_amount,
                 'measure_date': str(safe_get(measure, 'Datum', '')),
                 'name': safe_get(measure, 'Name', ''),
-                'category': 'PARKED_MEASURE',
-                'status': 'Manually assigned, awaiting SAP' if manual_assignment else 'Awaiting Assignment',
+                'category': category,  # ← FIXED: Now correctly categorized
+                'status': status,      # ← FIXED: Now correctly set
                 'budget_impact': 'Reserved',
                 'department': department,
-                'region': manual_assignment.get('region', '') if manual_assignment else '',
-                'district': manual_assignment.get('district', '') if manual_assignment else '',
-                'location_type': location_type,  # Add the location type field
+                'region': region,      # ← FIXED: Empty until assigned
+                'district': district,  # ← FIXED: Empty until assigned
+                'location_type': location_type,
                 'manual_assignment': manual_assignment,
                 'msp_data': measure_data
             }
@@ -1016,40 +1027,48 @@ def generate_frontend_views(processed_data: Dict) -> None:
         region_data['total_amount'] = region_data['booked_amount'] + region_data['reserved_amount']
         regions_list.append(region_data)
     
-    # 3. Awaiting assignment view (parked measures grouped by department and location type)
+    # 3. Awaiting assignment view (UNASSIGNED measures grouped by department and location type)
     awaiting_assignment = {}
     
-    for measure in processed_data['parked_measures']:
-        if measure.get('status') != 'Awaiting Assignment':
+    # Look for UNASSIGNED_MEASURE transactions in all transactions (not just parked_measures)
+    for transaction in processed_data['transactions']:
+        # FIXED: Look for UNASSIGNED_MEASURE category instead of checking status
+        if transaction.get('category') != 'UNASSIGNED_MEASURE':
+            continue
+            
+        # Double-check status to be sure
+        if transaction.get('status') != 'Awaiting Assignment':
             continue
             
         # Get department with empty string fallback
-        dept = measure.get('department', '')
-        location_type = measure.get('location_type', 'Unknown')  # Get location type
+        dept = transaction.get('department', '')
+        location_type = transaction.get('location_type', 'Unknown')
         
         if not dept:
             # If no department, put in 'Unassigned' category
             dept = 'Unassigned'
         
-        # Create a combined key for department and location type
-        dept_key = f"{dept}|{location_type}"
-            
-        if dept_key not in awaiting_assignment:
-            awaiting_assignment[dept_key] = []
+        # Use simple department name as key (not combined with location_type)
+        # This is what the frontend expects based on your API structure
+        if dept not in awaiting_assignment:
+            awaiting_assignment[dept] = []
             
         # Create a safe version of the measure data
         safe_measure = {
-            'measure_id': measure.get('measure_id', ''),
-            'bestellnummer': measure.get('bestellnummer', 0),
-            'measure_title': measure.get('measure_title', ''),
-            'estimated_amount': safe_float_conversion(measure.get('estimated_amount', 0)),
-            'measure_date': measure.get('measure_date', ''),
+            'measure_id': transaction.get('measure_id', ''),
+            'bestellnummer': transaction.get('bestellnummer', 0),
+            'measure_title': transaction.get('measure_title', ''),
+            'estimated_amount': safe_float_conversion(transaction.get('estimated_amount', 0)),
+            'measure_date': transaction.get('measure_date', ''),
             'department': dept,
-            'location_type': location_type,  # Add the location type
-            'name': measure.get('name', '')  # Empty string as fallback
+            'location_type': location_type,
+            'name': transaction.get('name', ''),
+            'text': transaction.get('text', ''),  # Add text field
+            'status': transaction.get('status', ''),
+            'category': transaction.get('category', '')
         }
             
-        awaiting_assignment[dept_key].append(safe_measure)
+        awaiting_assignment[dept].append(safe_measure)
     
     # Save the views to blob storage in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:

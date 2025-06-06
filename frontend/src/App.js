@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Header from './components/Header';
 import Dashboard from './components/Dashboard'; // This imports from components/Dashboard/index.js
-import TransactionsList from './components/TransactionsList';
 import './styles.css';
 
 function App() {
@@ -51,18 +50,12 @@ function App() {
         <div className="error">Error: {error}</div>
       ) : (
         <>
-          {/* This is the modular Dashboard component */}
+          {/* Clean Dashboard component - no redundant bottom components */}
           <Dashboard 
             stats={apiData.transaction_stats} 
             budgetData={apiData.budget_allocation} 
             awaitingAssignment={apiData.awaiting_assignment}
             apiUrl={API_URL}
-          />
-          
-          {/* Keep your existing TransactionsList component */}
-          <TransactionsList 
-            awaitingAssignment={apiData.awaiting_assignment}
-            apiUrl={API_URL} 
           />
         </>
       )}

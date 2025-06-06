@@ -1,0 +1,415 @@
+/* DepartmentDetail.css - Compatible with existing global styles */
+
+/* Use existing CSS variables from global styles */
+.department-detail {
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.department-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.department-header h3 {
+  margin: 0;
+  color: var(--text-color);
+}
+
+.back-button {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+/* Budget Overview - Extends existing .card style */
+.budget-overview {
+  background-color: var(--card-background);
+  border-radius: 4px;
+  padding: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  margin-bottom: 20px;
+}
+
+.budget-overview h4 {
+  margin: 0 0 15px 0;
+  color: var(--text-color);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.budget-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 15px;
+  margin-bottom: 15px;
+}
+
+.budget-stat {
+  display: flex;
+  flex-direction: column;
+}
+
+.budget-stat-label {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.budget-stat-value {
+  font-size: 18px;
+  font-weight: bold;
+}
+
+/* Use existing color variables */
+.budget-stat-value.allocated {
+  color: var(--success-color);
+}
+
+.budget-stat-value.spent {
+  color: var(--error-color);
+}
+
+.budget-stat-value.positive {
+  color: var(--success-color);
+}
+
+.budget-stat-value.negative {
+  color: var(--error-color);
+}
+
+.budget-stat-value.good {
+  color: var(--success-color);
+}
+
+.budget-stat-value.warning {
+  color: #ff8c00; /* Orange for warning */
+}
+
+.budget-stat-value.over {
+  color: var(--error-color);
+}
+
+/* Enhanced Budget Progress Bar - replaces the simple progress bar */
+.budget-progress-container {
+  margin-top: 15px;
+}
+
+.budget-progress-bar {
+  width: 100%;
+  height: 24px;
+  background-color: var(--border-color);
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+  border: 1px solid #ddd;
+}
+
+.budget-progress-segments {
+  display: flex;
+  height: 100%;
+  width: 100%;
+}
+
+.budget-segment {
+  height: 100%;
+  transition: width 0.3s ease;
+  position: relative;
+}
+
+.budget-segment.booked {
+  background-color: #dc3545; /* Red for booked */
+}
+
+.budget-segment.reserved {
+  background-color: #ffc107; /* Yellow for reserved */
+}
+
+.budget-segment.remaining {
+  background-color: var(--success-color); /* Green for remaining */
+}
+
+/* Segment labels that appear on hover */
+.budget-segment:hover::after {
+  content: attr(data-label);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+  z-index: 10;
+  margin-bottom: 5px;
+}
+
+.budget-segment:hover::before {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top-color: rgba(0, 0, 0, 0.8);
+  z-index: 10;
+}
+
+/* Legend below the progress bar */
+.budget-progress-legend {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #666;
+}
+
+.budget-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.budget-legend-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+.budget-legend-color.booked {
+  background-color: #dc3545;
+}
+
+.budget-legend-color.reserved {
+  background-color: #ffc107;
+}
+
+.budget-legend-color.remaining {
+  background-color: var(--success-color);
+}
+
+/* Over-allocated indicator */
+.budget-progress-bar.over-allocated {
+  border-color: var(--error-color);
+  box-shadow: 0 0 0 2px rgba(220, 53, 69, 0.2);
+}
+
+.budget-progress-bar.over-allocated .budget-segment.booked,
+.budget-progress-bar.over-allocated .budget-segment.reserved {
+  background: repeating-linear-gradient(
+    45deg,
+    currentColor,
+    currentColor 4px,
+    rgba(255, 255, 255, 0.3) 4px,
+    rgba(255, 255, 255, 0.3) 8px
+  );
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .budget-progress-legend {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  
+  .budget-legend-item {
+    font-size: 11px;
+  }
+}
+
+.budget-simple {
+  font-size: 16px;
+  font-weight: bold;
+  color: var(--success-color);
+}
+
+.budget-alert {
+  margin-bottom: 20px;
+  padding: 15px;
+  background-color: rgba(255, 140, 0, 0.1);
+  border-radius: 4px;
+  border: 1px solid #ff8c00;
+  color: #cc7000;
+}
+
+/* Regions Section - Extends existing .budget-table */
+.regions-section {
+  margin-bottom: 20px;
+}
+
+/* Override existing budget-header for more columns */
+.regions-section .budget-header {
+  grid-template-columns: 1.5fr 1fr 1fr 1fr 1fr 1fr 1fr;
+  font-size: 14px;
+  color: var(--text-color);
+}
+
+.regions-section .budget-row {
+  grid-template-columns: 1.5fr 1fr 1fr 1fr 1fr 1fr 1fr;
+}
+
+.budget-row.clickable {
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.budget-row.clickable:hover {
+  background-color: rgba(0, 120, 212, 0.05);
+}
+
+/* Budget data styling in table cells */
+.budget-row .has-budget {
+  color: var(--success-color);
+  font-weight: 600;
+}
+
+.budget-row .no-budget {
+  color: #999;
+  font-style: italic;
+  font-size: 12px;
+}
+
+.budget-row .has-spending {
+  color: var(--error-color);
+  font-weight: 500;
+}
+
+.budget-row .no-spending {
+  color: #999;
+  font-size: 12px;
+}
+
+.budget-row .positive {
+  color: var(--success-color);
+  font-weight: 600;
+}
+
+.budget-row .negative {
+  color: var(--error-color);
+  font-weight: 600;
+}
+
+/* Regional Budget Summary - Uses existing card style as base */
+.regional-budget-summary {
+  background-color: var(--card-background);
+  border-radius: 4px;
+  padding: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  margin-top: 20px;
+  border-left: 4px solid var(--primary-color);
+}
+
+.regional-budget-summary h4 {
+  margin: 0 0 15px 0;
+  color: var(--text-color);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.regional-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.regional-budget-card {
+  padding: 12px;
+  background-color: var(--background-color);
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  transition: box-shadow 0.2s;
+}
+
+.regional-budget-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.regional-budget-name {
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--text-color);
+  font-size: 14px;
+}
+
+.regional-budget-amounts {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 4px;
+  font-family: 'Courier New', monospace; /* For better number alignment */
+}
+
+.regional-budget-usage {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.regional-budget-usage.good {
+  color: var(--success-color);
+}
+
+.regional-budget-usage.warning {
+  color: #ff8c00;
+}
+
+.regional-budget-usage.over {
+  color: var(--error-color);
+}
+
+/* Responsive Design - Extends existing responsive rules */
+@media (max-width: 768px) {
+  .budget-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+  
+  .regional-cards-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  /* Adjust table for mobile */
+  .regions-section .budget-header,
+  .regions-section .budget-row {
+    grid-template-columns: 2fr 1fr 1fr 1fr;
+    font-size: 12px;
+  }
+  
+  /* Hide some columns on mobile */
+  .regions-section .budget-header div:nth-child(3),
+  .regions-section .budget-header div:nth-child(4),
+  .regions-section .budget-row div:nth-child(3),
+  .regions-section .budget-row div:nth-child(4) {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .department-header {
+    flex-direction: column;
+    text-align: center;
+    gap: 10px;
+  }
+  
+  .budget-stats-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .regions-section .budget-header,
+  .regions-section .budget-row {
+    grid-template-columns: 2fr 1fr 1fr;
+  }
+  
+  /* Hide even more columns on very small screens */
+  .regions-section .budget-header div:nth-child(6),
+  .regions-section .budget-header div:nth-child(7),
+  .regions-section .budget-row div:nth-child(6),
+  .regions-section .budget-row div:nth-child(7) {
+    display: none;
+  }
+}
