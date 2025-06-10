@@ -21,7 +21,6 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
   // Get budget data and functions from the hook - NOW WITH REFRESH!
   const { 
     budgetData, 
-    loadBudgetData, 
     refreshBudgetData, // ✅ NEW: Get the refresh function
     getDepartmentBudget, 
     getDepartmentRegionalBudgets,

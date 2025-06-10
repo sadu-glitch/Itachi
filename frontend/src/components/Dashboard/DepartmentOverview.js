@@ -1,6 +1,6 @@
 import React from 'react';
 import {
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, Text
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar
 } from 'recharts';
 import { formatCurrency } from '../../utils/formatters';
 import { useBudgetProgress } from '../../hooks/useBudget';
