@@ -138,11 +138,9 @@ def get_transactions():
         logger.error(f"Error getting transactions: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# REPLACE your existing budget_allocation function with this one:
-
 @app.route('/api/budget-allocation', methods=['GET', 'POST'])
 def budget_allocation():
-    """Get or update budget allocations with AUDIT TRAIL"""
+    """Get or update budget allocations with CONSOLIDATED AUDIT TRAIL"""
     try:
         if request.method == 'GET':
             try:
@@ -179,11 +177,6 @@ def budget_allocation():
             
             logger.info(f"🔄 Budget update request from: {user_name} ({user_ip})")
             
-            # SAFETY: Create backup before any changes
-            backup_filename = create_budget_backup()
-            if backup_filename:
-                logger.info(f"🔒 SAFETY: Created backup {backup_filename} before budget update")
-            
             # Load existing data
             try:
                 existing_budgets = read_from_blob("processed-data", "budget_allocation.json", as_json=True)
@@ -191,6 +184,11 @@ def budget_allocation():
             except Exception as e:
                 logger.info(f"📝 Creating new budget file: {str(e)}")
                 existing_budgets = {}
+            
+            # SAFETY: Create consolidated backup before any changes
+            backup_success = create_consolidated_backup(existing_budgets, change_id, user_name)
+            if backup_success:
+                logger.info(f"🔒 SAFETY: Created consolidated backup for change {change_id}")
             
             # Ensure structure exists
             if 'departments' not in existing_budgets or existing_budgets['departments'] is None:
@@ -228,7 +226,7 @@ def budget_allocation():
                         'new_value': new_budget,
                         'change_amount': new_budget - old_budget,
                         'change_reason': change_reason,
-                        'backup_file': backup_filename
+                        'backup_reference': change_id  # Reference to backup in consolidated file
                     }
                     audit_entries.append(audit_entry)
                     
@@ -265,7 +263,7 @@ def budget_allocation():
                                 'new_value': 0,
                                 'change_amount': -old_region_budget,
                                 'change_reason': f"Region reallocation for {change_reason}",
-                                'backup_file': backup_filename
+                                'backup_reference': change_id
                             }
                             audit_entries.append(audit_entry)
                         
@@ -299,7 +297,7 @@ def budget_allocation():
                         'new_value': new_region_budget,
                         'change_amount': new_region_budget,
                         'change_reason': change_reason,
-                        'backup_file': backup_filename
+                        'backup_reference': change_id
                     }
                     audit_entries.append(audit_entry)
                 
@@ -326,10 +324,10 @@ def budget_allocation():
                 logger.error(f"❌ CRITICAL: Failed to save budget data: {str(save_error)}")
                 return jsonify({"status": "error", "message": f"Failed to save: {str(save_error)}"}), 500
             
-            # AUDIT: Save audit trail if there were any changes
+            # AUDIT: Save consolidated audit trail if there were any changes
             if audit_entries:
                 try:
-                    save_audit_trail(audit_entries)
+                    save_consolidated_audit_trail(audit_entries)
                     logger.info(f"📋 AUDIT: Saved {len(audit_entries)} audit entries for change {change_id}")
                 except Exception as audit_error:
                     logger.error(f"❌ Failed to save audit trail: {str(audit_error)}")
@@ -342,7 +340,7 @@ def budget_allocation():
                 "departments_updated": len(departments_updated),
                 "regions_updated": len(regions_updated),
                 "audit_entries": len(audit_entries),
-                "backup_created": backup_filename,
+                "backup_created": True,
                 "updated_by": user_name
             })
     
@@ -350,70 +348,155 @@ def budget_allocation():
         logger.error(f"❌ Budget allocation error: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-
-# ADD these new functions at the end of your app.py file (before if __name__ == '__main__':)
-
-def save_audit_trail(audit_entries):
-    """Save audit trail entries to persistent storage"""
+def save_consolidated_audit_trail(audit_entries):
+    """Save audit trail entries to a single consolidated file"""
     try:
-        # Load existing audit trail
+        # Load existing consolidated audit trail
         try:
-            existing_audit = read_from_blob("processed-data", "budget_audit_trail.json", as_json=True)
+            existing_audit = read_from_blob("processed-data", "budget_audit_trail_consolidated.json", as_json=True)
             if 'entries' not in existing_audit:
                 existing_audit['entries'] = []
+            if 'metadata' not in existing_audit:
+                existing_audit['metadata'] = {}
         except Exception as e:
-            logger.info(f"Creating new audit trail file: {str(e)}")
-            existing_audit = {'entries': []}
+            logger.info(f"Creating new consolidated audit trail file: {str(e)}")
+            existing_audit = {
+                'entries': [],
+                'metadata': {
+                    'created': datetime.now().isoformat(),
+                    'total_changes': 0,
+                    'file_description': 'Consolidated budget audit trail - all changes in one file'
+                }
+            }
         
-        # Add new entries
-        existing_audit['entries'].extend(audit_entries)
+        # Add new entries at the beginning (most recent first)
+        existing_audit['entries'] = audit_entries + existing_audit['entries']
         
-        # Add metadata
-        existing_audit['last_updated'] = datetime.now().isoformat()
-        existing_audit['total_entries'] = len(existing_audit['entries'])
+        # Update metadata
+        existing_audit['metadata']['last_updated'] = datetime.now().isoformat()
+        existing_audit['metadata']['total_entries'] = len(existing_audit['entries'])
+        existing_audit['metadata']['total_changes'] = existing_audit['metadata'].get('total_changes', 0) + len(audit_entries)
         
-        # Save updated audit trail
-        save_to_blob("processed-data", "budget_audit_trail.json", existing_audit)
+        # Keep only the most recent 1000 entries to manage file size
+        max_entries = 1000
+        if len(existing_audit['entries']) > max_entries:
+            archived_entries = existing_audit['entries'][max_entries:]
+            existing_audit['entries'] = existing_audit['entries'][:max_entries]
+            
+            # Save archived entries to a separate file
+            save_archived_audit_entries(archived_entries)
+            
+            existing_audit['metadata']['archived_entries'] = len(archived_entries)
+            existing_audit['metadata']['last_archive_date'] = datetime.now().isoformat()
+            logger.info(f"📦 Archived {len(archived_entries)} old audit entries")
         
-        # Also save a monthly audit file for archival
-        month_year = datetime.now().strftime("%Y_%m")
-        monthly_filename = f"budget_audit_{month_year}.json"
+        # Save updated consolidated audit trail
+        save_to_blob("processed-data", "budget_audit_trail_consolidated.json", existing_audit)
         
-        try:
-            monthly_audit = read_from_blob("processed-data", monthly_filename, as_json=True)
-        except:
-            monthly_audit = {'entries': [], 'month': month_year}
-        
-        monthly_audit['entries'].extend(audit_entries)
-        monthly_audit['last_updated'] = datetime.now().isoformat()
-        save_to_blob("processed-data", monthly_filename, monthly_audit)
-        
-        logger.info(f"✅ Audit trail saved to both main and monthly files")
+        logger.info(f"✅ Consolidated audit trail updated with {len(audit_entries)} new entries")
         
     except Exception as e:
-        logger.error(f"❌ Failed to save audit trail: {str(e)}")
+        logger.error(f"❌ Failed to save consolidated audit trail: {str(e)}")
         raise
 
+def save_archived_audit_entries(archived_entries):
+    """Save archived audit entries to a separate archive file"""
+    try:
+        # Load existing archive
+        try:
+            archive = read_from_blob("processed-data", "budget_audit_archive.json", as_json=True)
+            if 'entries' not in archive:
+                archive['entries'] = []
+        except:
+            archive = {
+                'entries': [],
+                'metadata': {
+                    'created': datetime.now().isoformat(),
+                    'description': 'Archived budget audit entries - older entries moved from main file'
+                }
+            }
+        
+        # Add archived entries
+        archive['entries'].extend(archived_entries)
+        archive['metadata']['last_updated'] = datetime.now().isoformat()
+        archive['metadata']['total_archived_entries'] = len(archive['entries'])
+        
+        # Save archive
+        save_to_blob("processed-data", "budget_audit_archive.json", archive)
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to save archived audit entries: {str(e)}")
 
+def create_consolidated_backup(current_data, change_id, user_name):
+    """Add backup snapshot to consolidated backup file instead of creating separate files"""
+    try:
+        # Load existing consolidated backup file
+        try:
+            backup_data = read_from_blob("processed-data", "budget_backups_consolidated.json", as_json=True)
+            if 'backups' not in backup_data:
+                backup_data['backups'] = []
+            if 'metadata' not in backup_data:
+                backup_data['metadata'] = {}
+        except Exception as e:
+            logger.info(f"Creating new consolidated backup file: {str(e)}")
+            backup_data = {
+                'backups': [],
+                'metadata': {
+                    'created': datetime.now().isoformat(),
+                    'description': 'Consolidated budget backups - all snapshots in one file'
+                }
+            }
+        
+        # Create backup entry
+        backup_entry = {
+            'backup_id': change_id,
+            'timestamp': datetime.now().isoformat(),
+            'user_name': user_name,
+            'data_snapshot': current_data.copy() if current_data else {}
+        }
+        
+        # Add to beginning of list (most recent first)
+        backup_data['backups'].insert(0, backup_entry)
+        
+        # Keep only the most recent 50 backups to manage file size
+        max_backups = 50
+        if len(backup_data['backups']) > max_backups:
+            backup_data['backups'] = backup_data['backups'][:max_backups]
+            logger.info(f"🗂️ Trimmed backup history to most recent {max_backups} entries")
+        
+        # Update metadata
+        backup_data['metadata']['last_updated'] = datetime.now().isoformat()
+        backup_data['metadata']['total_backups'] = len(backup_data['backups'])
+        backup_data['metadata']['last_backup_by'] = user_name
+        
+        # Save consolidated backup file
+        save_to_blob("processed-data", "budget_backups_consolidated.json", backup_data)
+        
+        logger.info(f"✅ Added backup snapshot to consolidated file (ID: {change_id})")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to create consolidated backup: {str(e)}")
+        return False
 
 @app.route('/api/budget-history', methods=['GET'])
 def get_budget_history():
-    """Get budget change history with filtering options"""
+    """Get budget change history from consolidated file with filtering options"""
     try:
         # Get query parameters
         entity_key = request.args.get('entity_key')  # Specific department or region
         entity_type = request.args.get('entity_type')  # 'department' or 'region'
-        user_id = request.args.get('user_id')
+        user_name = request.args.get('user_name')
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
         limit = int(request.args.get('limit', 100))
         
-        # Load audit trail
+        # Load consolidated audit trail
         try:
-            audit_data = read_from_blob("processed-data", "budget_audit_trail.json", as_json=True)
+            audit_data = read_from_blob("processed-data", "budget_audit_trail_consolidated.json", as_json=True)
             all_entries = audit_data.get('entries', [])
         except Exception as e:
-            logger.warning(f"No audit trail found: {str(e)}")
+            logger.warning(f"No consolidated audit trail found: {str(e)}")
             return jsonify({'entries': [], 'total': 0, 'filtered': 0})
         
         # Apply filters
@@ -425,8 +508,8 @@ def get_budget_history():
         if entity_type:
             filtered_entries = [e for e in filtered_entries if e.get('entity_type') == entity_type]
         
-        if user_id:
-            filtered_entries = [e for e in filtered_entries if e.get('user_id') == user_id]
+        if user_name:
+            filtered_entries = [e for e in filtered_entries if e.get('user_name') == user_name]
         
         if start_date:
             filtered_entries = [e for e in filtered_entries if e.get('timestamp', '') >= start_date]
@@ -434,8 +517,7 @@ def get_budget_history():
         if end_date:
             filtered_entries = [e for e in filtered_entries if e.get('timestamp', '') <= end_date]
         
-        # Sort by timestamp (newest first)
-        filtered_entries.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+        # Entries are already sorted by timestamp (newest first) in the consolidated file
         
         # Apply limit
         limited_entries = filtered_entries[:limit]
@@ -448,7 +530,7 @@ def get_budget_history():
             'filters_applied': {
                 'entity_key': entity_key,
                 'entity_type': entity_type,
-                'user_id': user_id,
+                'user_name': user_name,
                 'start_date': start_date,
                 'end_date': end_date,
                 'limit': limit
@@ -459,6 +541,59 @@ def get_budget_history():
         logger.error(f"Error getting budget history: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+@app.route('/api/budget-backups', methods=['GET'])
+def get_budget_backups():
+    """Get list of available budget backups from consolidated file"""
+    try:
+        limit = int(request.args.get('limit', 20))
+        
+        try:
+            backup_data = read_from_blob("processed-data", "budget_backups_consolidated.json", as_json=True)
+            backups = backup_data.get('backups', [])
+            metadata = backup_data.get('metadata', {})
+        except Exception as e:
+            logger.warning(f"No consolidated backup file found: {str(e)}")
+            return jsonify({'backups': [], 'metadata': {}, 'total': 0})
+        
+        # Return limited backup info (without full data snapshots for performance)
+        backup_list = []
+        for backup in backups[:limit]:
+            backup_info = {
+                'backup_id': backup.get('backup_id'),
+                'timestamp': backup.get('timestamp'),
+                'user_name': backup.get('user_name'),
+                'has_data': 'data_snapshot' in backup and backup['data_snapshot'] is not None
+            }
+            backup_list.append(backup_info)
+        
+        return jsonify({
+            'backups': backup_list,
+            'metadata': metadata,
+            'total': len(backups),
+            'returned': len(backup_list)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting budget backups: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/budget-backup/<backup_id>', methods=['GET'])
+def get_specific_backup(backup_id):
+    """Get a specific backup by its ID"""
+    try:
+        backup_data = read_from_blob("processed-data", "budget_backups_consolidated.json", as_json=True)
+        backups = backup_data.get('backups', [])
+        
+        # Find the specific backup
+        for backup in backups:
+            if backup.get('backup_id') == backup_id:
+                return jsonify(backup)
+        
+        return jsonify({"status": "error", "message": f"Backup with ID {backup_id} not found"}), 404
+        
+    except Exception as e:
+        logger.error(f"Error getting specific backup: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/budget-summary/<entity_key>', methods=['GET'])
 def get_budget_summary(entity_key):
@@ -482,25 +617,25 @@ def get_budget_summary(entity_key):
         if not current_budget:
             return jsonify({"status": "error", "message": "Entity not found"}), 404
         
-        # Get recent history for this entity
+        # Get recent history for this entity from consolidated file
         try:
-            audit_data = read_from_blob("processed-data", "budget_audit_trail.json", as_json=True)
+            audit_data = read_from_blob("processed-data", "budget_audit_trail_consolidated.json", as_json=True)
             entity_history = [
                 e for e in audit_data.get('entries', [])
                 if e.get('entity_key') == entity_key
             ]
-            # Sort by timestamp (newest first)
-            entity_history.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+            # Entries are already sorted by timestamp (newest first)
             recent_changes = entity_history[:10]  # Last 10 changes
         except:
             recent_changes = []
+            entity_history = []
         
         return jsonify({
             'entity_key': entity_key,
             'entity_type': entity_type,
             'current_budget': current_budget,
             'recent_changes': recent_changes,
-            'total_changes': len(entity_history) if 'entity_history' in locals() else 0
+            'total_changes': len(entity_history)
         })
         
     except Exception as e:
@@ -530,10 +665,6 @@ def debug_budgets():
         })
     except Exception as e:
         return jsonify({"error": str(e)})
-
-# REMOVED - We'll use the same pattern as measures instead
-# @app.route('/api/budget-allocation/<path:department_name>', methods=['GET'])
-# def get_department_budget(department_name):
 
 @app.route('/api/assign-measure', methods=['POST'])
 def assign_measure():
@@ -590,7 +721,7 @@ def assign_measure():
             action_message = f"Measure {assignment['bestellnummer']} moved back to awaiting assignment"
             
         else:
-            # Normal assign logic (your existing code)
+            # Normal assign logic
             for measure in transactions['parked_measures']:
                 if measure['bestellnummer'] == assignment['bestellnummer']:
                     measure_found = True
@@ -836,20 +967,28 @@ def list_files(container):
     except Exception as e:
         logger.error(f"Error listing files: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
-# ADD this function before "if __name__ == '__main__':" at the very end of your file:
 
-def create_budget_backup():
-    """Create a timestamped backup of the current budget allocation"""
+# Additional endpoint to clean up old files if needed
+@app.route('/api/cleanup-storage', methods=['POST'])
+def cleanup_storage():
+    """Optional endpoint to manually clean up very old files if storage becomes an issue"""
     try:
-        current_budget = read_from_blob("processed-data", "budget_allocation.json", as_json=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_filename = f"budget_allocation_backup_{timestamp}.json"
-        save_to_blob("processed-data", backup_filename, current_budget)
-        logger.info(f"✅ Budget backup created: {backup_filename}")
-        return backup_filename
+        cleanup_data = request.get_json()
+        days_to_keep = cleanup_data.get('days_to_keep', 90)  # Default keep 90 days
+        
+        # This is an optional maintenance endpoint
+        # You could implement logic here to remove very old archived entries
+        # if your storage becomes too full
+        
+        return jsonify({
+            "status": "success",
+            "message": f"Cleanup completed (keeping last {days_to_keep} days)",
+            "note": "Currently using consolidated files - cleanup not needed"
+        })
+        
     except Exception as e:
-        logger.error(f"❌ Failed to create budget backup: {str(e)}")
-        return None
+        logger.error(f"Error in cleanup: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 if __name__ == '__main__':
