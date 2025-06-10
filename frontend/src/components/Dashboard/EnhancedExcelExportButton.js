@@ -22,17 +22,15 @@ const EnhancedExcelExportButton = ({
   const [selectedDepartments, setSelectedDepartments] = useState(new Set());
   const [loading, setLoading] = useState(false);
 
-  // ✅ FIXED: Use the same budget hook pattern as DepartmentDetail and DepartmentOverview
-  const budgetHook = useBudgetProgress ? useBudgetProgress(baseApiUrl) : null;
+  // ✅ FIXED: Always call the hook unconditionally, but handle null case
+  const budgetHookResult = useBudgetProgress ? useBudgetProgress(baseApiUrl) : null;
 
-  // ✅ FIXED: Extract budget functions just like DepartmentDetail does
-  const { 
-    getDepartmentProgress, 
-    getRegionalProgress, 
-    loading: budgetLoading,
-    getDepartmentBudget,
-    budgetData: rawBudgetData
-  } = budgetHook || {};
+  // ✅ FIXED: Extract budget functions safely (they might be undefined)
+  const getDepartmentBudget = budgetHookResult?.getDepartmentBudget;
+  const getDepartmentProgress = budgetHookResult?.getDepartmentProgress;
+  const getRegionalProgress = budgetHookResult?.getRegionalProgress;
+  const budgetLoading = budgetHookResult?.loading;
+  const rawBudgetData = budgetHookResult?.budgetData;
 
   // Group departments by location_type with safety check
   const groupedDepartments = departments.reduce((groups, dept) => {
@@ -52,7 +50,7 @@ const EnhancedExcelExportButton = ({
 
   // ✅ ENHANCED: Use the same sophisticated budget lookup as DepartmentDetail
   const getEnhancedDepartmentBudget = (deptName) => {
-    if (!budgetHook) return { allocated_budget: 0, budget_found: false };
+    if (!budgetHookResult) return { allocated_budget: 0, budget_found: false };
 
     // Try the hook's getDepartmentBudget first
     const departmentBudget = getDepartmentBudget ? getDepartmentBudget(deptName) : null;
@@ -106,7 +104,7 @@ const EnhancedExcelExportButton = ({
 
   // ✅ ENHANCED: Get regional budget using the same logic as DepartmentDetail
   const getEnhancedRegionalBudgets = (deptName) => {
-    if (!budgetHook) return {};
+    if (!budgetHookResult) return {};
 
     const regionalProgress = getRegionalProgress ? getRegionalProgress(deptName) : [];
     const regionalBudgetLookup = {};
@@ -202,7 +200,7 @@ const EnhancedExcelExportButton = ({
 
   // ✅ ENHANCED: Enhanced department data with proper budget lookup
   const enhancedSelectedDepartments = useMemo(() => {
-    if (!budgetHook) return [];
+    if (!budgetHookResult) return [];
 
     const selectedDepartmentsList = departments.filter(dept => 
       selectedDepartments.has(dept.name)
@@ -221,7 +219,7 @@ const EnhancedExcelExportButton = ({
         regional_budgets: regionalBudgets
       };
     });
-  }, [selectedDepartments, departments, budgetHook, getDepartmentBudget, getDepartmentProgress, getRegionalProgress, rawBudgetData]);
+  }, [selectedDepartments, departments, budgetHookResult, getDepartmentBudget, getDepartmentProgress, getRegionalProgress, rawBudgetData]);
 
   // Generate Excel file when button is clicked
   const generateExcel = async () => {
@@ -230,7 +228,7 @@ const EnhancedExcelExportButton = ({
       return;
     }
 
-    if (!budgetHook) {
+    if (!budgetHookResult) {
       alert('Budget-System ist nicht verfügbar. Excel wird ohne Budget-Daten erstellt.');
     }
 
@@ -710,7 +708,7 @@ const EnhancedExcelExportButton = ({
         title="Excel Export mit Abteilungsauswahl und erweiterte Budget-Analyse"
         style={{
           padding: '10px 16px',
-          backgroundColor: budgetHook ? '#22c55e' : '#6b7280',
+          backgroundColor: budgetHookResult ? '#22c55e' : '#6b7280',
           color: 'white',
           border: 'none',
           borderRadius: '6px',
@@ -723,7 +721,7 @@ const EnhancedExcelExportButton = ({
         }}
       >
         <span role="img" aria-label="Excel">📊</span>
-        {budgetHook ? 'Erweiterte Excel-Analyse' : 'Excel Export (ohne Budget)'}
+        {budgetHookResult ? 'Erweiterte Excel-Analyse' : 'Excel Export (ohne Budget)'}
       </button>
 
       {/* Selection Modal */}
@@ -757,10 +755,10 @@ const EnhancedExcelExportButton = ({
             {/* Budget System Status */}
             <div style={{
               padding: '12px',
-              backgroundColor: budgetHook ? '#f0f9ff' : '#fef3c7',
+              backgroundColor: budgetHookResult ? '#f0f9ff' : '#fef3c7',
               borderRadius: '6px',
               marginBottom: '16px',
-              border: `1px solid ${budgetHook ? '#0ea5e9' : '#f59e0b'}`
+              border: `1px solid ${budgetHookResult ? '#0ea5e9' : '#f59e0b'}`
             }}>
               <div style={{ 
                 display: 'flex', 
@@ -769,11 +767,11 @@ const EnhancedExcelExportButton = ({
                 fontSize: '14px',
                 fontWeight: '500'
               }}>
-                {budgetHook ? '✅' : '⚠️'} 
-                Budget-System: {budgetHook ? 'Verbunden' : 'Nicht verfügbar'}
+                {budgetHookResult ? '✅' : '⚠️'} 
+                Budget-System: {budgetHookResult ? 'Verbunden' : 'Nicht verfügbar'}
               </div>
               <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-                {budgetHook ? 
+                {budgetHookResult ? 
                   'Budget-Daten werden live abgerufen und in Excel integriert' : 
                   'Excel wird ohne Budget-Analyse erstellt'
                 }
@@ -794,7 +792,7 @@ const EnhancedExcelExportButton = ({
             
             <div style={{ marginBottom: '20px', fontSize: '14px', color: '#666' }}>
               Wählen Sie die Abteilungen aus, die in den Excel-Export einbezogen werden sollen. 
-              {budgetHook && ' Budget-Analysen werden automatisch integriert.'}
+              {budgetHookResult && ' Budget-Analysen werden automatisch integriert.'}
             </div>
             
             {Object.entries(groupedDepartments).map(([locationType, depts]) => {
@@ -866,7 +864,7 @@ const EnhancedExcelExportButton = ({
                   }}>
                     {depts.map(dept => {
                       // Get budget info if available
-                      const budgetInfo = budgetHook ? getEnhancedDepartmentBudget(dept.name) : null;
+                      const budgetInfo = budgetHookResult ? getEnhancedDepartmentBudget(dept.name) : null;
                       const budgetStatus = budgetInfo?.allocated_budget > 0 ? 
                         getBudgetStatus(budgetInfo.allocated_budget, parseFloat(dept.total_amount || 0)) :
                         { indicator: '⚪', status: 'not_set' };
@@ -893,7 +891,7 @@ const EnhancedExcelExportButton = ({
                           />
                           <div style={{ flex: 1 }}>
                             <div style={{ fontWeight: '500' }}>{dept.name}</div>
-                            {budgetHook && budgetInfo && (
+                            {budgetHookResult && budgetInfo && (
                               <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>
                                 {budgetInfo.allocated_budget > 0 ? 
                                   `Budget: €${budgetInfo.allocated_budget.toLocaleString()}` : 
@@ -923,7 +921,7 @@ const EnhancedExcelExportButton = ({
             }}>
               <div style={{ fontSize: '14px', color: '#666' }}>
                 {selectedDepartments.size} Abteilung(en) ausgewählt
-                {budgetHook && enhancedSelectedDepartments.length > 0 && (
+                {budgetHookResult && enhancedSelectedDepartments.length > 0 && (
                   <div style={{ fontSize: '12px', marginTop: '4px' }}>
                     {enhancedSelectedDepartments.filter(d => d.budget_info?.budget_found).length} mit Budget gefunden
                   </div>
@@ -973,7 +971,7 @@ const EnhancedExcelExportButton = ({
             </div>
             
             {/* Budget Legend */}
-            {budgetHook && (
+            {budgetHookResult && (
               <div style={{
                 marginTop: '16px',
                 padding: '12px',
