@@ -7,13 +7,24 @@ import * as XLSX from 'xlsx';
  * @param {Array} props.departments - Array of department data
  * @param {Array} props.regions - Array of region data
  * @param {Array} props.transactions - All transactions data
+ * @param {string} props.baseApiUrl - Base API URL for budget data fetching
+ * @param {Function} props.useBudgetProgress - Budget hook function (if available)
  */
-const EnhancedExcelExportButton = ({ departments = [], regions = [], transactions = [] }) => {
+const EnhancedExcelExportButton = ({ 
+  departments = [], 
+  regions = [], 
+  transactions = [], 
+  baseApiUrl = '',
+  useBudgetProgress 
+}) => {
   const [showModal, setShowModal] = useState(false);
   const [selectedDepartments, setSelectedDepartments] = useState(new Set());
   const [budgetData, setBudgetData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [budgetLoading, setBudgetLoading] = useState(false);
+
+  // Try to use the budget hook if available, otherwise fallback to direct API
+  const budgetHook = useBudgetProgress ? useBudgetProgress(baseApiUrl) : null;
 
   // Group departments by location_type with safety check
   const groupedDepartments = departments.reduce((groups, dept) => {
@@ -31,29 +42,44 @@ const EnhancedExcelExportButton = ({ departments = [], regions = [], transaction
     }
   }, [departments]);
 
-  // Fetch budget data
+  // Fetch budget data using the same pattern as DepartmentOverview
   const fetchBudgetData = async () => {
     setBudgetLoading(true);
     try {
-      // Mock API call for demonstration - replace with actual endpoint
-      // const response = await fetch('/api/budget-allocation');
-      // if (response.ok) {
-      //   const data = await response.json();
-      //   setBudgetData(data);
-      // }
-      
-      // Mock budget data for demonstration
-      const mockBudgetData = {
-        departments: {
-          'IT Department|Floor': { allocated_budget: 50000 },
-          'Marketing|HQ': { allocated_budget: 30000 },
-          'Sales|Floor': { allocated_budget: 75000 }
-        },
-        regions: {}
-      };
-      
-      setBudgetData(mockBudgetData);
-      console.log("Budget data loaded:", mockBudgetData);
+      // If we have the budget hook, use it; otherwise try direct API call
+      if (budgetHook && budgetHook.getDepartmentBudget) {
+        console.log("Using budget hook to fetch data");
+        // The hook should already have the data loaded
+        setBudgetData({ 
+          departments: {}, // Hook handles individual lookups
+          regions: {},
+          isHookBased: true 
+        });
+      } else if (baseApiUrl) {
+        // Direct API call
+        const response = await fetch(`${baseApiUrl}/api/budget-allocation`);
+        if (response.ok) {
+          const data = await response.json();
+          setBudgetData(data);
+          console.log("Budget data loaded via API:", data);
+        } else {
+          console.warn("Could not fetch budget data from API");
+          setBudgetData({ departments: {}, regions: {} });
+        }
+      } else {
+        // Mock budget data for demonstration
+        const mockBudgetData = {
+          departments: {
+            'IT Department|Floor': { allocated_budget: 50000 },
+            'Marketing|HQ': { allocated_budget: 30000 },
+            'Sales|Floor': { allocated_budget: 75000 }
+          },
+          regions: {}
+        };
+        
+        setBudgetData(mockBudgetData);
+        console.log("Using mock budget data:", mockBudgetData);
+      }
       
     } catch (error) {
       console.error("Error fetching budget data:", error);
@@ -90,8 +116,14 @@ const EnhancedExcelExportButton = ({ departments = [], regions = [], transaction
     setSelectedDepartments(newSelected);
   };
 
-  // Get budget info for a department
+  // Get budget info for a department using the same pattern as DepartmentOverview
   const getDepartmentBudget = (deptName) => {
+    // If we have the budget hook, use it (preferred method)
+    if (budgetHook && budgetHook.getDepartmentBudget) {
+      return budgetHook.getDepartmentBudget(deptName);
+    }
+    
+    // Fallback to direct budget data lookup
     if (!budgetData?.departments) return null;
     
     // Try exact match first
@@ -124,7 +156,8 @@ const EnhancedExcelExportButton = ({ departments = [], regions = [], transaction
   // Open modal and fetch budget data
   const openModal = async () => {
     setShowModal(true);
-    if (!budgetData) {
+    // Always try to fetch/refresh budget data when opening modal
+    if (!budgetData || !budgetHook) {
       await fetchBudgetData();
     }
   };
@@ -140,8 +173,9 @@ const EnhancedExcelExportButton = ({ departments = [], regions = [], transaction
     try {
       console.log("Starting enhanced Excel generation...");
       
-      // Ensure we have budget data
-      if (!budgetData) {
+      // Ensure we have budget data (but don't block if unavailable)
+      if (!budgetData && !budgetHook) {
+        console.log("Fetching budget data for Excel generation...");
         await fetchBudgetData();
       }
       
@@ -801,7 +835,7 @@ const EnhancedExcelExportButton = ({ departments = [], regions = [], transaction
             </div>
             
             {/* Budget Legend */}
-            {budgetData && (
+            {(budgetData || budgetHook) && (
               <div style={{
                 marginTop: '16px',
                 padding: '12px',
@@ -816,6 +850,11 @@ const EnhancedExcelExportButton = ({ departments = [], regions = [], transaction
                   <span>🔴 Überschritten (100%)</span>
                   <span>⚪ Nicht gesetzt</span>
                 </div>
+                {budgetHook && (
+                  <div style={{ marginTop: '8px', fontSize: '11px', color: '#666' }}>
+                    Budget-Daten werden live abgerufen
+                  </div>
+                )}
               </div>
             )}
           </div>
