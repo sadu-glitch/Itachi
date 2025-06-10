@@ -301,7 +301,7 @@ const DepartmentOverview = ({ departments, onDepartmentClick, baseApiUrl }) => {
               </div>
 
               {depts.map(dept => {
-                const remaining = (dept.allocated_budget || 0) - (dept.total_amount || 0);
+                const _remaining = (dept.allocated_budget || 0) - (dept.total_amount || 0);
                 
                 return (
                   <div
