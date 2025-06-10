@@ -16,14 +16,23 @@ const EnhancedExcelExportButton = ({
   regions = [], 
   transactions = [], 
   baseApiUrl = '',
-  useBudgetProgress // ✅ Now required to match your working components
+  useBudgetProgress = null // ✅ Default to null instead of undefined
 }) => {
   const [showModal, setShowModal] = useState(false);
   const [selectedDepartments, setSelectedDepartments] = useState(new Set());
   const [loading, setLoading] = useState(false);
 
-  // ✅ FIXED: Always call the hook unconditionally, but handle null case
-  const budgetHookResult = useBudgetProgress ? useBudgetProgress(baseApiUrl) : null;
+  // ✅ FIXED: Create a safe hook caller that always returns consistent structure
+  const safeBudgetHook = useBudgetProgress || (() => ({
+    getDepartmentBudget: null,
+    getDepartmentProgress: null, 
+    getRegionalProgress: null,
+    loading: false,
+    budgetData: null
+  }));
+
+  // ✅ FIXED: Always call a hook (either the real one or the safe fallback)
+  const budgetHookResult = safeBudgetHook(baseApiUrl);
 
   // ✅ FIXED: Extract budget functions safely (they might be undefined)
   const getDepartmentBudget = budgetHookResult?.getDepartmentBudget;
