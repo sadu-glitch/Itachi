@@ -934,7 +934,7 @@ def save_to_blob(container_name: str, blob_name: str, data: Any) -> None:
 
 def generate_frontend_views(processed_data: Dict) -> None:
     """
-    Generate specialized views for frontend consumption with improved NaN handling
+    Generate specialized views for frontend consumption with BULLETPROOF budget preservation
     """
     start_time = time.time()
     
@@ -1070,50 +1070,163 @@ def generate_frontend_views(processed_data: Dict) -> None:
             
         awaiting_assignment[dept].append(safe_measure)
     
+    # 4. BULLETPROOF Budget allocation preservation
+    logger.info("🔒 BULLETPROOF BUDGET PRESERVATION - Starting...")
+    
+    # STEP 1: Always load existing budget data FIRST (never start from scratch)
+    try:
+        existing_budget = read_from_blob("processed-data", "budget_allocation.json", as_json=True)
+        logger.info(f"✅ Loaded existing budget file with {len(existing_budget.get('departments', {}))} departments")
+        
+        # Ensure structure exists
+        if 'departments' not in existing_budget:
+            existing_budget['departments'] = {}
+        if 'regions' not in existing_budget:
+            existing_budget['regions'] = {}
+            
+    except Exception as e:
+        logger.info(f"📝 No existing budget file found, creating new one: {str(e)}")
+        existing_budget = {
+            'departments': {},
+            'regions': {},
+            'last_updated': None
+        }
+    
+    # STEP 2: PRESERVE ALL EXISTING BUDGET DATA (never overwrite non-zero budgets)
+    preserved_departments = existing_budget['departments'].copy()
+    preserved_regions = existing_budget['regions'].copy()
+    
+    logger.info(f"🔒 PRESERVING {len(preserved_departments)} existing department budgets")
+    logger.info(f"🔒 PRESERVING {len(preserved_regions)} existing region budgets")
+    
+    # STEP 3: Only ADD new departments/regions with zero budgets (never modify existing)
+    new_departments_added = 0
+    new_regions_added = 0
+    
+    # Add new departments (only if they don't exist)
+    for dept in departments_list:
+        dept_key = f"{dept['name']}|{dept['location_type']}"
+        
+        if dept_key not in preserved_departments:
+            preserved_departments[dept_key] = {
+                'allocated_budget': 0,  # Only new departments get 0
+                'location_type': dept['location_type']
+            }
+            new_departments_added += 1
+            logger.info(f"➕ ADDED new department: {dept_key}")
+        else:
+            # Log that we're preserving existing budget
+            existing_budget_amount = preserved_departments[dept_key].get('allocated_budget', 0)
+            logger.info(f"🔒 PRESERVED department: {dept_key} (budget: €{existing_budget_amount:,.2f})")
+    
+    # Add new regions (only if they don't exist)
+    for region in regions_list:
+        region_key = f"{region['department']}|{region['name']}|{region['location_type']}"
+        
+        if region_key not in preserved_regions:
+            preserved_regions[region_key] = {
+                'allocated_budget': 0,  # Only new regions get 0
+                'location_type': region['location_type']
+            }
+            new_regions_added += 1
+            logger.info(f"➕ ADDED new region: {region_key}")
+        else:
+            # Log that we're preserving existing budget
+            existing_budget_amount = preserved_regions[region_key].get('allocated_budget', 0)
+            logger.info(f"🔒 PRESERVED region: {region_key} (budget: €{existing_budget_amount:,.2f})")
+    
+    # STEP 4: Create the final budget allocation (all existing data preserved)
+    final_budget_allocation = {
+        'departments': preserved_departments,
+        'regions': preserved_regions,
+        'last_updated': existing_budget.get('last_updated')  # Don't change timestamp unless budgets were actually modified
+    }
+    
+    # STEP 5: Calculate preservation statistics
+    total_preserved_budget = 0
+    non_zero_departments = 0
+    
+    for dept_data in preserved_departments.values():
+        budget = dept_data.get('allocated_budget', 0)
+        if budget > 0:
+            non_zero_departments += 1
+            total_preserved_budget += budget
+    
+    logger.info(f"💰 BUDGET PRESERVATION SUMMARY:")
+    logger.info(f"   - Preserved departments: {len(preserved_departments)}")
+    logger.info(f"   - Departments with budgets: {non_zero_departments}")
+    logger.info(f"   - Total preserved budget: €{total_preserved_budget:,.2f}")
+    logger.info(f"   - New departments added: {new_departments_added}")
+    logger.info(f"   - New regions added: {new_regions_added}")
+    
+    # STEP 6: Save with backup logic
+    try:
+        # First, create a backup of the current budget file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_filename = f"budget_allocation_backup_{timestamp}.json"
+        
+        try:
+            current_budget = read_from_blob("processed-data", "budget_allocation.json", as_json=True)
+            save_to_blob("processed-data", backup_filename, current_budget)
+            logger.info(f"📋 Created backup: {backup_filename}")
+        except:
+            logger.info("📋 No existing budget to backup")
+        
+        # Save the preserved budget data
+        save_to_blob("processed-data", "budget_allocation.json", final_budget_allocation)
+        logger.info(f"💾 Successfully saved budget data with ALL existing budgets preserved")
+        
+    except Exception as save_error:
+        logger.error(f"❌ CRITICAL: Failed to save budget data: {str(save_error)}")
+        raise  # Don't continue if we can't save budgets
+    
+    logger.info("🔒 BULLETPROOF BUDGET PRESERVATION - Completed successfully")
+    
     # Save the views to blob storage in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         executor.submit(save_to_blob, "processed-data", "frontend_departments.json", {'departments': departments_list})
         executor.submit(save_to_blob, "processed-data", "frontend_regions.json", {'regions': regions_list})
         executor.submit(save_to_blob, "processed-data", "frontend_awaiting_assignment.json", awaiting_assignment)
     
-    # 4. Budget allocation view (to be populated by the frontend)
-    # Initialize with default values based on departments and regions
-    budget_allocation = {
-        'departments': {},
-        'regions': {}
-    }
-    
-    for dept in departments_list:
-        # Include location_type in the key
-        dept_key = f"{dept['name']}|{dept['location_type']}"
-        budget_allocation['departments'][dept_key] = {
-            'allocated_budget': 0,  # To be set by admin
-            'location_type': dept['location_type']  # Add location type
-        }
-        
-    for region in regions_list:
-        # Include location_type in the key
-        region_key = f"{region['department']}|{region['name']}|{region['location_type']}"
-        budget_allocation['regions'][region_key] = {
-            'allocated_budget': 0,  # To be set by admin
-            'location_type': region['location_type']  # Add location type
-        }
-    
-    # Try to read existing budget allocation
-    try:
-        existing_budget = read_from_blob("processed-data", "budget_allocation.json", as_json=True)
-        # Merge with initialized structure
-        for dept_key, dept_data in existing_budget.get('departments', {}).items():
-            if dept_key in budget_allocation['departments']:
-                budget_allocation['departments'][dept_key] = dept_data
-                
-        for region_key, region_data in existing_budget.get('regions', {}).items():
-            if region_key in budget_allocation['regions']:
-                budget_allocation['regions'][region_key] = region_data
-    except Exception as e:
-        logger.warning(f"No existing budget allocation found: {str(e)}")
-    
-    save_to_blob("processed-data", "budget_allocation.json", budget_allocation)
-    
     elapsed_time = time.time() - start_time
     logger.info(f"Generated frontend views in {elapsed_time:.2f} seconds")
+
+
+# ADDITIONAL SAFETY FUNCTIONS (add these if they don't exist)
+def create_budget_backup():
+    """
+    Create a timestamped backup of the current budget allocation
+    """
+    try:
+        current_budget = read_from_blob("processed-data", "budget_allocation.json", as_json=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_filename = f"budget_allocation_backup_{timestamp}.json"
+        save_to_blob("processed-data", backup_filename, current_budget)
+        logger.info(f"✅ Budget backup created: {backup_filename}")
+        return backup_filename
+    except Exception as e:
+        logger.error(f"❌ Failed to create budget backup: {str(e)}")
+        return None
+
+
+def validate_budget_integrity(budget_data):
+    """
+    Validate that budget data is not accidentally corrupted
+    """
+    if not isinstance(budget_data, dict):
+        raise ValueError("Budget data must be a dictionary")
+    
+    if 'departments' not in budget_data or 'regions' not in budget_data:
+        raise ValueError("Budget data missing required sections")
+    
+    # Check for reasonable budget values
+    total_budget = 0
+    for dept_data in budget_data['departments'].values():
+        budget = dept_data.get('allocated_budget', 0)
+        if budget < 0:
+            raise ValueError(f"Negative budget found: {budget}")
+        total_budget += budget
+    
+    # Log validation results
+    logger.info(f"✅ Budget validation passed - Total budget: €{total_budget:,.2f}")
+    return True
