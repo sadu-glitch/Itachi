@@ -6,7 +6,8 @@ import RegionDetail from './RegionDetail';
 import TransactionDetail from './TransactionDetail';
 import { useDepartmentData } from '../../hooks/useDepartmentData';
 import { useTransactionData } from '../../hooks/useTransactionData';
-import ExcelExportButton from '../ExcelExportButton';
+import { useBudgetProgress } from '../../hooks/useBudget';
+import EnhancedExcelExportButton from './EnhancedExcelExportButton';
 import '../../styles/excel-export.css';
 
 // Main Dashboard component that orchestrates the overall structure
@@ -132,11 +133,13 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
         
         {/* Excel Export Button - only show in main view */}
         {!selectedDepartment && departmentsData.departments && regionsData.regions && allTransactions.length > 0 && (
-          <ExcelExportButton 
-            departments={departmentsData.departments || []} 
-            regions={regionsData.regions || []}
-            transactions={allTransactions}
-          />
+          <EnhancedExcelExportButton  // ✅ Correct component name
+  departments={departmentsData.departments || []} 
+  regions={regionsData.regions || []}
+  transactions={allTransactions}
+  baseApiUrl={baseApiUrl}
+  useBudgetProgress={useBudgetProgress}  // ✅ Add this line
+/>
         )}
       </div>
       
