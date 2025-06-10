@@ -138,12 +138,13 @@ def get_transactions():
         logger.error(f"Error getting transactions: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+# REPLACE your existing budget_allocation function with this one:
+
 @app.route('/api/budget-allocation', methods=['GET', 'POST'])
 def budget_allocation():
-    """Get or update budget allocations - SIMPLIFIED TO MATCH MEASURES PATTERN"""
+    """Get or update budget allocations with AUDIT TRAIL"""
     try:
         if request.method == 'GET':
-            # Use the same pattern as /api/data - just return the budget file
             try:
                 budgets = read_from_blob("processed-data", "budget_allocation.json", as_json=True)
                 logger.info(f"📊 Returning budget data with {len(budgets.get('departments', {}))} departments")
@@ -157,7 +158,6 @@ def budget_allocation():
                 })
         
         elif request.method == 'POST':
-            # BULLETPROOF DATA WAREHOUSE APPROACH
             data = request.get_json()
             
             if not data:
@@ -167,7 +167,24 @@ def budget_allocation():
             if 'departments' not in data or 'regions' not in data:
                 return jsonify({"status": "error", "message": "Invalid data structure"}), 400
             
-            # STEP 1: Read existing data (or create empty if none exists)
+            # AUDIT: Extract user information from headers
+            user_name = request.headers.get('X-User-Name', 'Unknown User')
+            change_reason = request.headers.get('X-Change-Reason', 'Budget allocation update')
+            user_ip = request.remote_addr
+            user_agent = request.headers.get('User-Agent', 'Unknown Browser')[:100]  # Truncate long user agents
+            
+            # Create unique user ID and change ID
+            user_id = f"user_{user_name.replace(' ', '_').lower()}_{int(datetime.now().timestamp())}"
+            change_id = f"CHG_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{user_name.replace(' ', '_')[:10]}"
+            
+            logger.info(f"🔄 Budget update request from: {user_name} ({user_ip})")
+            
+            # SAFETY: Create backup before any changes
+            backup_filename = create_budget_backup()
+            if backup_filename:
+                logger.info(f"🔒 SAFETY: Created backup {backup_filename} before budget update")
+            
+            # Load existing data
             try:
                 existing_budgets = read_from_blob("processed-data", "budget_allocation.json", as_json=True)
                 logger.info(f"✅ Loaded existing budget file")
@@ -175,79 +192,319 @@ def budget_allocation():
                 logger.info(f"📝 Creating new budget file: {str(e)}")
                 existing_budgets = {}
             
-            # STEP 2: Ensure structure exists (bulletproof)
+            # Ensure structure exists
             if 'departments' not in existing_budgets or existing_budgets['departments'] is None:
                 existing_budgets['departments'] = {}
             if 'regions' not in existing_budgets or existing_budgets['regions'] is None:
                 existing_budgets['regions'] = {}
             
-            # STEP 3: Log what we have BEFORE merging
-            existing_dept_names = list(existing_budgets['departments'].keys())
-            logger.info(f"📊 BEFORE MERGE - Existing departments ({len(existing_dept_names)}): {existing_dept_names}")
+            # AUDIT: Prepare audit trail
+            audit_entries = []
+            change_timestamp = datetime.now().isoformat()
             
-            # STEP 4: Process each NEW department individually (DATA WAREHOUSE APPROACH)
+            # Process department changes with audit logging
+            departments_updated = []
             for new_dept_name, new_dept_data in data['departments'].items():
+                old_budget = 0
                 if new_dept_name in existing_budgets['departments']:
-                    logger.info(f"🔄 UPDATING existing department: {new_dept_name}")
-                else:
-                    logger.info(f"➕ ADDING new department: {new_dept_name}")
+                    old_budget = existing_budgets['departments'][new_dept_name].get('allocated_budget', 0)
                 
-                # Set/Update the department data (this preserves other departments)
+                new_budget = new_dept_data['allocated_budget']
+                
+                # Only log if there's an actual change
+                if old_budget != new_budget:
+                    audit_entry = {
+                        'change_id': change_id,
+                        'timestamp': change_timestamp,
+                        'user_name': user_name,
+                        'user_id': user_id,
+                        'user_ip': user_ip,
+                        'user_agent': user_agent,
+                        'change_type': 'department_budget',
+                        'entity_type': 'department',
+                        'entity_key': new_dept_name,
+                        'entity_name': new_dept_name.split('|')[0],  # Department name without location type
+                        'old_value': old_budget,
+                        'new_value': new_budget,
+                        'change_amount': new_budget - old_budget,
+                        'change_reason': change_reason,
+                        'backup_file': backup_filename
+                    }
+                    audit_entries.append(audit_entry)
+                    
+                    logger.info(f"📝 AUDIT: {user_name} changed {new_dept_name} budget: €{old_budget:,.2f} → €{new_budget:,.2f}")
+                
                 existing_budgets['departments'][new_dept_name] = new_dept_data
+                departments_updated.append(new_dept_name)
             
-            # STEP 5: Handle regions - remove old regions for ONLY the departments we're updating
+            # Process region changes with audit logging
+            regions_updated = []
             new_dept_names = list(data['departments'].keys())
             
-            # Find and remove old region entries for departments we're updating
+            # Remove old region entries for departments being updated
             regions_to_remove = []
             for existing_region_key in list(existing_budgets['regions'].keys()):
                 for updating_dept_name in new_dept_names:
                     if existing_region_key.startswith(f"{updating_dept_name}|"):
+                        old_region_budget = existing_budgets['regions'][existing_region_key].get('allocated_budget', 0)
+                        
+                        # Log region removal if it had a budget
+                        if old_region_budget > 0:
+                            audit_entry = {
+                                'change_id': change_id,
+                                'timestamp': change_timestamp,
+                                'user_name': user_name,
+                                'user_id': user_id,
+                                'user_ip': user_ip,
+                                'user_agent': user_agent,
+                                'change_type': 'region_budget',
+                                'entity_type': 'region',
+                                'entity_key': existing_region_key,
+                                'entity_name': existing_region_key.split('|')[1],  # Region name
+                                'old_value': old_region_budget,
+                                'new_value': 0,
+                                'change_amount': -old_region_budget,
+                                'change_reason': f"Region reallocation for {change_reason}",
+                                'backup_file': backup_filename
+                            }
+                            audit_entries.append(audit_entry)
+                        
                         regions_to_remove.append(existing_region_key)
-                        logger.info(f"🗑️ Will remove old region: {existing_region_key}")
                         break
             
             # Remove the old regions
             for region_key in regions_to_remove:
                 if region_key in existing_budgets['regions']:
                     del existing_budgets['regions'][region_key]
+                    logger.info(f"🗑️ Removed old region: {region_key}")
             
-            # Add new regions
+            # Add new regions with audit logging
             for new_region_key, new_region_data in data['regions'].items():
+                new_region_budget = new_region_data['allocated_budget']
+                
+                # Log new region budget allocation
+                if new_region_budget > 0:
+                    audit_entry = {
+                        'change_id': change_id,
+                        'timestamp': change_timestamp,
+                        'user_name': user_name,
+                        'user_id': user_id,
+                        'user_ip': user_ip,
+                        'user_agent': user_agent,
+                        'change_type': 'region_budget',
+                        'entity_type': 'region',
+                        'entity_key': new_region_key,
+                        'entity_name': new_region_key.split('|')[1],  # Region name
+                        'old_value': 0,
+                        'new_value': new_region_budget,
+                        'change_amount': new_region_budget,
+                        'change_reason': change_reason,
+                        'backup_file': backup_filename
+                    }
+                    audit_entries.append(audit_entry)
+                
                 existing_budgets['regions'][new_region_key] = new_region_data
-                logger.info(f"➕ Added region: {new_region_key}")
+                regions_updated.append(new_region_key)
+                logger.info(f"➕ Added/updated region: {new_region_key}")
             
-            # STEP 6: Add metadata
-            existing_budgets['last_updated'] = datetime.now().isoformat()
+            # Add metadata
+            existing_budgets['last_updated'] = change_timestamp
+            existing_budgets['last_change_id'] = change_id
+            existing_budgets['last_updated_by'] = {
+                'user_name': user_name,
+                'user_id': user_id,
+                'user_ip': user_ip,
+                'change_reason': change_reason
+            }
             
-            # STEP 7: Log what we have AFTER merging
-            final_dept_names = list(existing_budgets['departments'].keys())
-            logger.info(f"📊 AFTER MERGE - Final departments ({len(final_dept_names)}): {final_dept_names}")
-            
-            # STEP 8: Save the updated data
+            # Save the updated budget data
             try:
                 save_to_blob("processed-data", "budget_allocation.json", existing_budgets)
-                logger.info(f"💾 Successfully saved budget data with {len(final_dept_names)} departments")
-                
-                # STEP 9: Verify the save worked by reading it back
-                verification = read_from_blob("processed-data", "budget_allocation.json", as_json=True)
-                verified_dept_names = list(verification.get('departments', {}).keys())
-                logger.info(f"✅ VERIFICATION - Saved departments ({len(verified_dept_names)}): {verified_dept_names}")
+                logger.info(f"💾 Successfully saved budget data")
                 
             except Exception as save_error:
-                logger.error(f"❌ Failed to save budget data: {str(save_error)}")
+                logger.error(f"❌ CRITICAL: Failed to save budget data: {str(save_error)}")
                 return jsonify({"status": "error", "message": f"Failed to save: {str(save_error)}"}), 500
+            
+            # AUDIT: Save audit trail if there were any changes
+            if audit_entries:
+                try:
+                    save_audit_trail(audit_entries)
+                    logger.info(f"📋 AUDIT: Saved {len(audit_entries)} audit entries for change {change_id}")
+                except Exception as audit_error:
+                    logger.error(f"❌ Failed to save audit trail: {str(audit_error)}")
+                    # Don't fail the request if audit logging fails, but log the error
             
             return jsonify({
                 "status": "success", 
-                "message": f"Budget saved! Total departments: {len(final_dept_names)}",
-                "departments_total": len(final_dept_names),
-                "departments_updated": new_dept_names,
-                "all_departments": final_dept_names
+                "message": f"Budget saved successfully by {user_name}",
+                "change_id": change_id,
+                "departments_updated": len(departments_updated),
+                "regions_updated": len(regions_updated),
+                "audit_entries": len(audit_entries),
+                "backup_created": backup_filename,
+                "updated_by": user_name
             })
     
     except Exception as e:
         logger.error(f"❌ Budget allocation error: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# ADD these new functions at the end of your app.py file (before if __name__ == '__main__':)
+
+def save_audit_trail(audit_entries):
+    """Save audit trail entries to persistent storage"""
+    try:
+        # Load existing audit trail
+        try:
+            existing_audit = read_from_blob("processed-data", "budget_audit_trail.json", as_json=True)
+            if 'entries' not in existing_audit:
+                existing_audit['entries'] = []
+        except Exception as e:
+            logger.info(f"Creating new audit trail file: {str(e)}")
+            existing_audit = {'entries': []}
+        
+        # Add new entries
+        existing_audit['entries'].extend(audit_entries)
+        
+        # Add metadata
+        existing_audit['last_updated'] = datetime.now().isoformat()
+        existing_audit['total_entries'] = len(existing_audit['entries'])
+        
+        # Save updated audit trail
+        save_to_blob("processed-data", "budget_audit_trail.json", existing_audit)
+        
+        # Also save a monthly audit file for archival
+        month_year = datetime.now().strftime("%Y_%m")
+        monthly_filename = f"budget_audit_{month_year}.json"
+        
+        try:
+            monthly_audit = read_from_blob("processed-data", monthly_filename, as_json=True)
+        except:
+            monthly_audit = {'entries': [], 'month': month_year}
+        
+        monthly_audit['entries'].extend(audit_entries)
+        monthly_audit['last_updated'] = datetime.now().isoformat()
+        save_to_blob("processed-data", monthly_filename, monthly_audit)
+        
+        logger.info(f"✅ Audit trail saved to both main and monthly files")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to save audit trail: {str(e)}")
+        raise
+
+
+
+@app.route('/api/budget-history', methods=['GET'])
+def get_budget_history():
+    """Get budget change history with filtering options"""
+    try:
+        # Get query parameters
+        entity_key = request.args.get('entity_key')  # Specific department or region
+        entity_type = request.args.get('entity_type')  # 'department' or 'region'
+        user_id = request.args.get('user_id')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        limit = int(request.args.get('limit', 100))
+        
+        # Load audit trail
+        try:
+            audit_data = read_from_blob("processed-data", "budget_audit_trail.json", as_json=True)
+            all_entries = audit_data.get('entries', [])
+        except Exception as e:
+            logger.warning(f"No audit trail found: {str(e)}")
+            return jsonify({'entries': [], 'total': 0, 'filtered': 0})
+        
+        # Apply filters
+        filtered_entries = all_entries
+        
+        if entity_key:
+            filtered_entries = [e for e in filtered_entries if e.get('entity_key') == entity_key]
+        
+        if entity_type:
+            filtered_entries = [e for e in filtered_entries if e.get('entity_type') == entity_type]
+        
+        if user_id:
+            filtered_entries = [e for e in filtered_entries if e.get('user_id') == user_id]
+        
+        if start_date:
+            filtered_entries = [e for e in filtered_entries if e.get('timestamp', '') >= start_date]
+        
+        if end_date:
+            filtered_entries = [e for e in filtered_entries if e.get('timestamp', '') <= end_date]
+        
+        # Sort by timestamp (newest first)
+        filtered_entries.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+        
+        # Apply limit
+        limited_entries = filtered_entries[:limit]
+        
+        return jsonify({
+            'entries': limited_entries,
+            'total': len(all_entries),
+            'filtered': len(filtered_entries),
+            'returned': len(limited_entries),
+            'filters_applied': {
+                'entity_key': entity_key,
+                'entity_type': entity_type,
+                'user_id': user_id,
+                'start_date': start_date,
+                'end_date': end_date,
+                'limit': limit
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting budget history: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/budget-summary/<entity_key>', methods=['GET'])
+def get_budget_summary(entity_key):
+    """Get budget summary for a specific entity with recent changes"""
+    try:
+        entity_key = unquote(entity_key)
+        
+        # Get current budget
+        budgets = read_from_blob("processed-data", "budget_allocation.json", as_json=True)
+        
+        current_budget = None
+        entity_type = None
+        
+        if entity_key in budgets.get('departments', {}):
+            current_budget = budgets['departments'][entity_key]
+            entity_type = 'department'
+        elif entity_key in budgets.get('regions', {}):
+            current_budget = budgets['regions'][entity_key]
+            entity_type = 'region'
+        
+        if not current_budget:
+            return jsonify({"status": "error", "message": "Entity not found"}), 404
+        
+        # Get recent history for this entity
+        try:
+            audit_data = read_from_blob("processed-data", "budget_audit_trail.json", as_json=True)
+            entity_history = [
+                e for e in audit_data.get('entries', [])
+                if e.get('entity_key') == entity_key
+            ]
+            # Sort by timestamp (newest first)
+            entity_history.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+            recent_changes = entity_history[:10]  # Last 10 changes
+        except:
+            recent_changes = []
+        
+        return jsonify({
+            'entity_key': entity_key,
+            'entity_type': entity_type,
+            'current_budget': current_budget,
+            'recent_changes': recent_changes,
+            'total_changes': len(entity_history) if 'entity_history' in locals() else 0
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting budget summary: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/test-department/<path:dept_name>', methods=['GET'])
@@ -579,6 +836,21 @@ def list_files(container):
     except Exception as e:
         logger.error(f"Error listing files: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
+# ADD this function before "if __name__ == '__main__':" at the very end of your file:
+
+def create_budget_backup():
+    """Create a timestamped backup of the current budget allocation"""
+    try:
+        current_budget = read_from_blob("processed-data", "budget_allocation.json", as_json=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_filename = f"budget_allocation_backup_{timestamp}.json"
+        save_to_blob("processed-data", backup_filename, current_budget)
+        logger.info(f"✅ Budget backup created: {backup_filename}")
+        return backup_filename
+    except Exception as e:
+        logger.error(f"❌ Failed to create budget backup: {str(e)}")
+        return None
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))

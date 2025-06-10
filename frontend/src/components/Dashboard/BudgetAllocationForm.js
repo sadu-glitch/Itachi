@@ -2,11 +2,7 @@ import React, { useState } from 'react';
 import { useBudget } from '../../hooks/useBudget';
 
 /**
- * Enhanced component for budget allocation with regional distribution for all department types
- * @param {Object} props - Component props
- * @param {Array} props.departments - Array of department data
- * @param {string} props.baseApiUrl - Base API URL
- * @param {Function} props.onSuccess - Success callback function
+ * Enhanced component for budget allocation with regional distribution and audit trail
  */
 const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
   const [selectedDepartment, setSelectedDepartment] = useState(null);
@@ -17,28 +13,39 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [loadingExistingBudgets, setLoadingExistingBudgets] = useState(false);
+  
+  // NEW: User tracking states
+  const [userName, setUserName] = useState(
+    localStorage.getItem('budgetUserName') || ''
+  );
+  const [changeReason, setChangeReason] = useState('');
 
-  // Get budget data and functions from the hook - NOW WITH REFRESH!
+  // Get budget data and functions from the hook
   const { 
     budgetData, 
-    refreshBudgetData, // ✅ NEW: Get the refresh function
+    refreshBudgetData,
     getDepartmentBudget, 
     getDepartmentRegionalBudgets,
     loading: budgetHookLoading 
   } = useBudget(baseApiUrl);
 
+  // NEW: Save user name to localStorage for future use
+  const handleUserNameChange = (e) => {
+    const name = e.target.value;
+    setUserName(name);
+    localStorage.setItem('budgetUserName', name);
+  };
+
   // Load existing budget data using the hook's functions
-  const loadExistingBudgets = async (department) => { // ✅ MADE ASYNC
+  const loadExistingBudgets = async (department) => {
     if (!department) return;
     
     console.log('🔄 Loading existing budgets for:', department.name);
     setLoadingExistingBudgets(true);
     
     try {
-      // ✅ NEW: Refresh budget data first to get latest
       await refreshBudgetData();
       
-      // Use hook functions to get budget data
       const departmentBudgetData = getDepartmentBudget(department.name);
       const regionalBudgetData = getDepartmentRegionalBudgets(department.name);
       
@@ -47,16 +54,14 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
       
       let hasExistingData = false;
       
-      // Set department budget if it exists
       if (departmentBudgetData?.allocated_budget) {
         setDepartmentBudget(departmentBudgetData.allocated_budget);
         hasExistingData = true;
         console.log('💰 Set department budget:', departmentBudgetData.allocated_budget);
       } else {
-        setDepartmentBudget(0); // ✅ RESET if no budget found
+        setDepartmentBudget(0);
       }
       
-      // Set regional budgets if they exist
       if (Object.keys(regionalBudgetData).length > 0) {
         const formattedRegionalBudgets = {};
         Object.entries(regionalBudgetData).forEach(([regionName, regionData]) => {
@@ -67,7 +72,7 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
         setRegionalBudgets(formattedRegionalBudgets);
         console.log('🗺️ Set regional budgets:', formattedRegionalBudgets);
       } else {
-        setRegionalBudgets({}); // ✅ RESET if no regional budgets found
+        setRegionalBudgets({});
       }
       
       if (hasExistingData) {
@@ -97,7 +102,6 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
     setSuccess(null);
     
     if (dept) {
-      // ✅ SIMPLIFIED: Always load existing budgets (refresh is now inside loadExistingBudgets)
       await loadExistingBudgets(dept);
     }
   };
@@ -116,7 +120,6 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
     const amount = parseFloat(e.target.value) || 0;
     setDepartmentBudget(amount);
     
-    // Reset regional budgets if new amount is less than currently allocated
     if (amount < totalRegionalBudget) {
       setRegionalBudgets({});
     }
@@ -144,9 +147,7 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
     const newRegionalBudgets = {};
     
     departmentRegions.forEach((region, index) => {
-      // Give any remainder to the first region
       const amount = index === 0 ? remainingBudget - (equalAmount * (departmentRegions.length - 1)) : equalAmount;
-      // Handle string array format (your actual data structure)
       const regionKey = typeof region === 'string' ? region : (region.name || `Region ${index + 1}`);
       newRegionalBudgets[regionKey] = (regionalBudgets[regionKey] || 0) + amount;
     });
@@ -165,6 +166,12 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
   // Handle budget submission
   const handleBudgetSubmit = async (e) => {
     e.preventDefault();
+    
+    // NEW: Validate user name is provided
+    if (!userName.trim()) {
+      setError('Please enter your name for audit tracking');
+      return;
+    }
     
     if (!selectedDepartment || departmentBudget <= 0) {
       setError('Please select a department and enter a valid budget amount');
@@ -190,28 +197,25 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
       
       console.log('Setting budget for:', selectedDepartment.name, 'Type:', selectedDepartment.location_type);
       
-      // *** STEP 1: REFRESH TO GET LATEST DATA ***
+      // Refresh to get latest data
       console.log('🔄 Refreshing budget data before saving...');
-      await refreshBudgetData(); // ✅ NEW: Use refresh instead of manual fetch
+      await refreshBudgetData();
       
-      // *** STEP 2: CREATE COMPLETE PAYLOAD WITH ALL DATA ***
+      // Build complete payload
       console.log('📦 Building complete payload...');
       
-      // Start with existing departments and add/update current department
       const allDepartments = {
-        ...budgetData.departments, // Use refreshed data
+        ...budgetData.departments,
         [selectedDepartment.name]: {
           allocated_budget: departmentBudget,
           location_type: selectedDepartment.location_type
         }
       };
       
-      // Start with existing regions
-      let allRegions = { ...budgetData.regions }; // Use refreshed data
+      let allRegions = { ...budgetData.regions };
       
-      // For departments with regions, update regional budgets
       if (departmentRegions.length > 0) {
-        // First, remove old regional entries for this department
+        // Remove old regional entries for this department
         Object.keys(allRegions).forEach(regionKey => {
           if (regionKey.startsWith(selectedDepartment.name + '|')) {
             delete allRegions[regionKey];
@@ -219,7 +223,7 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
           }
         });
         
-        // Then add new regional entries
+        // Add new regional entries
         departmentRegions.forEach((region, index) => {
           const regionName = typeof region === 'string' ? region : (region.name || `Region ${index + 1}`);
           const regionKey = `${selectedDepartment.name}|${regionName}|${selectedDepartment.location_type}`;
@@ -231,7 +235,6 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
         });
       }
       
-      // Create the complete request payload
       const requestPayload = {
         departments: allDepartments,
         regions: allRegions
@@ -244,13 +247,17 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
         currentDept: selectedDepartment.name
       });
       
-      // *** STEP 3: SEND THE COMPLETE DATA TO BACKEND ***
+      // NEW: Enhanced request with audit headers
+      const auditHeaders = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'X-User-Name': userName.trim(),
+        'X-Change-Reason': changeReason.trim() || `Budget allocation for ${selectedDepartment.name}`
+      };
+      
       const response = await fetch(`${normalizedApiUrl}/api/budget-allocation`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
+        headers: auditHeaders,
         mode: 'cors',
         credentials: 'same-origin',
         body: JSON.stringify(requestPayload)
@@ -265,24 +272,39 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
       const responseData = await response.json();
       console.log('✅ Budget setting successful:', responseData);
       
-      // Show success message based on whether department has regions
+      // NEW: Enhanced success message with audit information
+      let successMessage = '';
       if (departmentRegions.length === 0) {
-        setSuccess(`Budget of €${departmentBudget.toLocaleString('de-DE')} set for ${selectedDepartment.name} (${selectedDepartment.location_type})`);
+        successMessage = `Budget of €${departmentBudget.toLocaleString('de-DE')} set for ${selectedDepartment.name} (${selectedDepartment.location_type})`;
       } else {
-        setSuccess(`Department Budget of €${departmentBudget.toLocaleString('de-DE')} allocated across ${departmentRegions.length} regions for ${selectedDepartment.name} (${selectedDepartment.location_type})`);
+        successMessage = `Department Budget of €${departmentBudget.toLocaleString('de-DE')} allocated across ${departmentRegions.length} regions for ${selectedDepartment.name} (${selectedDepartment.location_type})`;
       }
+      
+      // Add audit information to success message
+      if (responseData.change_id) {
+        successMessage += `\n📋 Change ID: ${responseData.change_id}`;
+      }
+      if (responseData.audit_entries > 0) {
+        successMessage += `\n📝 ${responseData.audit_entries} audit entries recorded`;
+      }
+      if (responseData.updated_by) {
+        successMessage += `\n👤 Updated by: ${responseData.updated_by}`;
+      }
+      
+      setSuccess(successMessage);
       
       // Reset form
       setSelectedDepartment(null);
       setDepartmentBudget(0);
       setRegionalBudgets({});
       setAllowPartialAllocation(false);
+      setChangeReason(''); // Clear change reason
       
       if (onSuccess) {
         await onSuccess();
       }
 
-      // ✅ ENHANCED: Refresh budget data for all components
+      // Refresh budget data for all components
       try {
         await refreshBudgetData();
         console.log('🔄 Budget data refreshed for all components');
@@ -302,6 +324,59 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
     <div className="budget-summary">
       <h3>Budget Allocation</h3>
       
+      {/* NEW: User Information Section */}
+      <div style={{ 
+        marginBottom: '20px', 
+        padding: '15px', 
+        backgroundColor: '#f8f9fa', 
+        borderRadius: '6px',
+        border: '1px solid #dee2e6'
+      }}>
+        <h4 style={{ margin: '0 0 10px 0', fontSize: '16px' }}>👤 User Information</h4>
+        
+        <div className="form-group" style={{ marginBottom: '15px' }}>
+          <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+            Your Name (for audit trail) *
+          </label>
+          <input
+            type="text"
+            value={userName}
+            onChange={handleUserNameChange}
+            placeholder="Enter your full name"
+            required
+            style={{
+              width: '100%',
+              padding: '8px',
+              borderRadius: '4px',
+              border: '1px solid #ddd',
+              fontSize: '14px'
+            }}
+          />
+          <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+            This will be recorded in the audit trail for accountability
+          </div>
+        </div>
+        
+        <div className="form-group" style={{ marginBottom: '0' }}>
+          <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+            Reason for Change (optional)
+          </label>
+          <input
+            type="text"
+            value={changeReason}
+            onChange={(e) => setChangeReason(e.target.value)}
+            placeholder="e.g., Q2 budget increase, project approval, etc."
+            style={{
+              width: '100%',
+              padding: '8px',
+              borderRadius: '4px',
+              border: '1px solid #ddd',
+              fontSize: '14px'
+            }}
+          />
+        </div>
+      </div>
+      
       {/* Debug Information - Remove in production */}
       {selectedDepartment && (
         <div style={{ 
@@ -319,8 +394,10 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
           <div>Loading existing budgets: {loadingExistingBudgets ? 'Yes' : 'No'}</div>
           <div>Budget hook loading: {budgetHookLoading ? 'Yes' : 'No'}</div>
           <div>Budget data loaded: {budgetData.departments ? Object.keys(budgetData.departments).length : 0} departments</div>
-          <div>Current department budget: {departmentBudget}</div> {/* ✅ NEW DEBUG INFO */}
-          <div>Regional budgets: {JSON.stringify(regionalBudgets)}</div> {/* ✅ NEW DEBUG INFO */}
+          <div>Current department budget: {departmentBudget}</div>
+          <div>Regional budgets: {JSON.stringify(regionalBudgets)}</div>
+          <div>User name: {userName}</div>
+          <div>Change reason: {changeReason}</div>
         </div>
       )}
       
@@ -346,7 +423,8 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
           backgroundColor: '#e8f5e8',
           color: '#2e7d32',
           border: '1px solid #81c784',
-          borderRadius: '4px'
+          borderRadius: '4px',
+          whiteSpace: 'pre-line'
         }}>
           ✅ {success}
         </div>
@@ -551,7 +629,6 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
 
             {/* Regional Budget Inputs */}
             {departmentRegions.map((region, index) => {
-              // Handle string array format (your actual data structure)
               const regionName = typeof region === 'string' ? region : (region.name || `Region ${index + 1}`);
               const regionDisplayName = regionName;
               
@@ -617,6 +694,7 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
             budgetHookLoading ||
             !selectedDepartment || 
             departmentBudget <= 0 ||
+            !userName.trim() || // NEW: Add name validation
             (departmentRegions.length > 0 && !allowPartialAllocation && Math.abs(totalRegionalBudget - departmentBudget) > 0.01)
           }
           style={{
@@ -626,6 +704,7 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
               budgetHookLoading ||
               !selectedDepartment || 
               departmentBudget <= 0 ||
+              !userName.trim() || // NEW: Add name validation
               (departmentRegions.length > 0 && !allowPartialAllocation && Math.abs(totalRegionalBudget - departmentBudget) > 0.01)
             ) ? 0.6 : 1,
             width: '100%'
@@ -634,6 +713,7 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
           {loading ? 'Setting Budget...' : 
            budgetHookLoading ? 'Loading Budget Data...' :
            loadingExistingBudgets ? 'Loading Existing Budgets...' :
+           !userName.trim() ? 'Enter Your Name First' : // NEW: Add name validation message
            departmentRegions.length === 0 ? 'Set Department Budget' : 
            allowPartialAllocation ? 'Set Budget (Partial Allocation)' :
            `Set Budget (${Math.abs(totalRegionalBudget - departmentBudget) < 0.01 ? '✓ Ready' : '⚠️ Check Allocation'})`}
