@@ -19,7 +19,7 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [error, setError] = useState(null);
   
-  // Get the base API URL - use provided apiUrl or fall back to localhost for development
+  // Get the base API URL - use provided apiUrl or fall back to localhost for developmentt
   const baseApiUrl = apiUrl || 'http://localhost:5000';
   
   // Use custom hooks for data fetching
