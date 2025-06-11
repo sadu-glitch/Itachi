@@ -4,6 +4,21 @@ import {
 } from 'recharts';
 import { formatCurrency } from '../../utils/formatters';
 import { useBudgetProgress } from '../../hooks/useBudget';
+// At the top of any component file (like DepartmentOverview.js)
+import DatabaseAPITester from './DatabaseAPITester';
+
+// Then temporarily add this anywhere in your render:
+const [showTest, setShowTest] = useState(false);
+
+// In your JSX:
+<div>
+  <button onClick={() => setShowTest(!showTest)}>
+    Toggle API Test
+  </button>
+  {showTest && <DatabaseAPITester />}
+  
+  {/* Your existing component content */}
+</div>
 
 // ✅ NEW: Custom XAxis tick component for wrapped text
 const CustomXAxisTick = ({ x, y, payload }) => {
