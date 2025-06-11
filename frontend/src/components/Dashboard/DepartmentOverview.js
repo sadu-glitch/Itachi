@@ -5,7 +5,7 @@ import {
 import { formatCurrency } from '../../utils/formatters';
 import { useBudgetProgress } from '../../hooks/useBudget';
 // At the top of any component file (like DepartmentOverview.js)
-import DatabaseAPITester from './DatabaseAPITester';
+import DatabaseAPITester from './TEST';
 
 // Then temporarily add this anywhere in your render:
 const [showTest, setShowTest] = useState(false);
