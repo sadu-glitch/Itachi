@@ -1,5 +1,5 @@
+
 import React, { useState, useEffect } from 'react';
-import { AlertCircle, CheckCircle, Database, Loader, RefreshCw, Download, Upload } from 'lucide-react';
 
 const DatabaseAPITester = () => {
   const [results, setResults] = useState({});
@@ -278,7 +278,6 @@ const DatabaseAPITester = () => {
     await testGetData();
     await testGetTransactions();
     await testGetBudgetAllocation();
-    // Note: Skipping POST tests in "run all" to avoid data changes
   };
 
   // Auto-run health check on component mount
@@ -286,43 +285,79 @@ const DatabaseAPITester = () => {
     testHealthCheck();
   }, [apiUrl]);
 
-  const ResultCard = ({ title, result, isLoading, icon: Icon }) => (
-    <div className="border rounded-lg p-4 mb-4">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <Icon size={20} className="text-blue-600" />
-          <h3 className="font-semibold">{title}</h3>
-        </div>
+  const ResultCard = ({ title, result, isLoading }) => (
+    <div style={{
+      border: '1px solid #ddd',
+      borderRadius: '8px',
+      padding: '16px',
+      marginBottom: '16px',
+      backgroundColor: 'white'
+    }}>
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: '12px'
+      }}>
+        <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 'bold' }}>{title}</h3>
         {result && (
-          result.success ? 
-            <CheckCircle size={20} className="text-green-600" /> : 
-            <AlertCircle size={20} className="text-red-600" />
+          <span style={{
+            padding: '4px 8px',
+            borderRadius: '4px',
+            fontSize: '12px',
+            fontWeight: 'bold',
+            backgroundColor: result.success ? '#d4edda' : '#f8d7da',
+            color: result.success ? '#155724' : '#721c24'
+          }}>
+            {result.success ? '✅ PASS' : '❌ FAIL'}
+          </span>
         )}
       </div>
       
       {isLoading && (
-        <div className="flex items-center gap-2 text-blue-600">
-          <Loader size={16} className="animate-spin" />
-          <span>Testing...</span>
+        <div style={{ color: '#0066cc', fontStyle: 'italic' }}>
+          🔄 Testing...
         </div>
       )}
       
       {result && !isLoading && (
         <div>
-          <p className={`font-medium ${result.success ? 'text-green-700' : 'text-red-700'}`}>
+          <p style={{
+            margin: '0 0 8px 0',
+            fontWeight: 'bold',
+            color: result.success ? '#155724' : '#721c24'
+          }}>
             {result.message}
           </p>
           
           {result.data && (
-            <div className="mt-2 p-2 bg-gray-50 rounded text-sm">
-              <pre className="whitespace-pre-wrap">
+            <details style={{ marginTop: '8px' }}>
+              <summary style={{ cursor: 'pointer', color: '#0066cc' }}>
+                View Response Data
+              </summary>
+              <pre style={{
+                marginTop: '8px',
+                padding: '8px',
+                backgroundColor: '#f8f9fa',
+                borderRadius: '4px',
+                fontSize: '12px',
+                overflow: 'auto',
+                maxHeight: '200px'
+              }}>
                 {JSON.stringify(result.data, null, 2)}
               </pre>
-            </div>
+            </details>
           )}
           
           {result.error && (
-            <div className="mt-2 p-2 bg-red-50 rounded text-sm text-red-700">
+            <div style={{
+              marginTop: '8px',
+              padding: '8px',
+              backgroundColor: '#f8d7da',
+              borderRadius: '4px',
+              fontSize: '12px',
+              color: '#721c24'
+            }}>
               <strong>Error:</strong> {result.error}
             </div>
           )}
@@ -332,115 +367,157 @@ const DatabaseAPITester = () => {
   );
 
   return (
-    <div className="max-w-4xl mx-auto p-6">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-2 flex items-center gap-2">
-          <Database className="text-blue-600" />
-          Database API Tester
+    <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px' }}>
+      <div style={{ marginBottom: '24px' }}>
+        <h1 style={{ fontSize: '32px', fontWeight: 'bold', marginBottom: '8px' }}>
+          🗄️ Database API Tester
         </h1>
-        <p className="text-gray-600">Test database integration vs blob storage compatibility</p>
+        <p style={{ color: '#666', margin: 0 }}>
+          Test database integration vs blob storage compatibility
+        </p>
       </div>
 
       {/* API URL Configuration */}
-      <div className="mb-6 p-4 bg-blue-50 rounded-lg">
-        <h2 className="font-semibold mb-2">API Configuration</h2>
-        <div className="flex gap-2">
+      <div style={{
+        marginBottom: '24px',
+        padding: '16px',
+        backgroundColor: '#e3f2fd',
+        borderRadius: '8px'
+      }}>
+        <h2 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '8px' }}>
+          API Configuration
+        </h2>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           <input
             type="text"
             value={apiUrl}
             onChange={(e) => setApiUrl(e.target.value)}
-            className="flex-1 px-3 py-2 border rounded"
+            style={{
+              flex: 1,
+              padding: '8px 12px',
+              border: '1px solid #ccc',
+              borderRadius: '4px'
+            }}
             placeholder="API URL (e.g., http://localhost:5001)"
           />
           <button
             onClick={runAllTests}
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2"
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#0066cc',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
           >
-            <RefreshCw size={16} />
-            Run All GET Tests
+            🔄 Run All GET Tests
           </button>
         </div>
       </div>
 
       {/* Test Assignment Data */}
-      <div className="mb-6 p-4 bg-yellow-50 rounded-lg">
-        <h2 className="font-semibold mb-2">Test Assignment Data</h2>
-        <div className="grid grid-cols-3 gap-2">
+      <div style={{
+        marginBottom: '24px',
+        padding: '16px',
+        backgroundColor: '#fff3cd',
+        borderRadius: '8px'
+      }}>
+        <h2 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '8px' }}>
+          Test Assignment Data
+        </h2>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
           <input
             type="number"
             value={testData.bestellnummer}
             onChange={(e) => setTestData(prev => ({ ...prev, bestellnummer: parseInt(e.target.value) }))}
-            className="px-3 py-2 border rounded"
+            style={{ padding: '8px 12px', border: '1px solid #ccc', borderRadius: '4px' }}
             placeholder="Bestellnummer"
           />
           <input
             type="text"
             value={testData.region}
             onChange={(e) => setTestData(prev => ({ ...prev, region: e.target.value }))}
-            className="px-3 py-2 border rounded"
+            style={{ padding: '8px 12px', border: '1px solid #ccc', borderRadius: '4px' }}
             placeholder="Region"
           />
           <input
             type="text"
             value={testData.district}
             onChange={(e) => setTestData(prev => ({ ...prev, district: e.target.value }))}
-            className="px-3 py-2 border rounded"
+            style={{ padding: '8px 12px', border: '1px solid #ccc', borderRadius: '4px' }}
             placeholder="District"
           />
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
         {/* GET Tests */}
         <div>
-          <h2 className="text-xl font-semibold mb-4 text-green-700">📥 GET Tests (Read Operations)</h2>
+          <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px', color: '#28a745' }}>
+            📥 GET Tests (Read Operations)
+          </h2>
           
           <ResultCard
             title="Health Check"
             result={results.health}
             isLoading={loading.health}
-            icon={CheckCircle}
           />
           
           <ResultCard
             title="Database Status"
             result={results.dbStatus}
             isLoading={loading.dbStatus}
-            icon={Database}
           />
           
           <ResultCard
             title="Get All Data"
             result={results.getData}
             isLoading={loading.getData}
-            icon={Download}
           />
           
           <ResultCard
             title="Get Transactions"
             result={results.getTransactions}
             isLoading={loading.getTransactions}
-            icon={Download}
           />
           
           <ResultCard
             title="Get Budget Allocation"
             result={results.getBudget}
             isLoading={loading.getBudget}
-            icon={Download}
           />
 
-          <div className="flex gap-2 mb-4">
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
             <button
               onClick={testGetData}
-              className="flex-1 px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+              style={{
+                flex: 1,
+                padding: '8px 12px',
+                backgroundColor: '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
               disabled={loading.getData}
             >
               Test Get Data
             </button>
             <button
               onClick={testGetTransactions}
-              className="flex-1 px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+              style={{
+                flex: 1,
+                padding: '8px 12px',
+                backgroundColor: '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
               disabled={loading.getTransactions}
             >
               Test Transactions
@@ -450,40 +527,57 @@ const DatabaseAPITester = () => {
 
         {/* POST Tests */}
         <div>
-          <h2 className="text-xl font-semibold mb-4 text-orange-700">📤 POST Tests (Write Operations)</h2>
+          <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px', color: '#fd7e14' }}>
+            📤 POST Tests (Write Operations)
+          </h2>
           
           <ResultCard
             title="Assign Measure"
             result={results.assignMeasure}
             isLoading={loading.assignMeasure}
-            icon={Upload}
           />
           
           <ResultCard
             title="Unassign Measure"
             result={results.unassignMeasure}
             isLoading={loading.unassignMeasure}
-            icon={Upload}
           />
           
           <ResultCard
             title="Update Budget"
             result={results.updateBudget}
             isLoading={loading.updateBudget}
-            icon={Upload}
           />
 
-          <div className="flex gap-2 mb-4">
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
             <button
               onClick={testAssignMeasure}
-              className="flex-1 px-3 py-2 bg-orange-600 text-white rounded hover:bg-orange-700"
+              style={{
+                flex: 1,
+                padding: '8px 12px',
+                backgroundColor: '#fd7e14',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
               disabled={loading.assignMeasure}
             >
               Test Assign
             </button>
             <button
               onClick={testUnassignMeasure}
-              className="flex-1 px-3 py-2 bg-orange-600 text-white rounded hover:bg-orange-700"
+              style={{
+                flex: 1,
+                padding: '8px 12px',
+                backgroundColor: '#fd7e14',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
               disabled={loading.unassignMeasure}
             >
               Test Unassign
@@ -492,13 +586,29 @@ const DatabaseAPITester = () => {
           
           <button
             onClick={testUpdateBudget}
-            className="w-full px-3 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 mb-4"
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              backgroundColor: '#6f42c1',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              marginBottom: '16px'
+            }}
             disabled={loading.updateBudget}
           >
             Test Budget Update
           </button>
 
-          <div className="p-3 bg-orange-50 rounded text-sm text-orange-700">
+          <div style={{
+            padding: '12px',
+            backgroundColor: '#fff3cd',
+            borderRadius: '4px',
+            fontSize: '12px',
+            color: '#856404'
+          }}>
             <strong>⚠️ Note:</strong> POST tests will modify data in your database. 
             Use with caution in production environments.
           </div>
@@ -506,32 +616,44 @@ const DatabaseAPITester = () => {
       </div>
 
       {/* Summary */}
-      <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-        <h2 className="font-semibold mb-2">Test Summary</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+      <div style={{
+        marginTop: '24px',
+        padding: '16px',
+        backgroundColor: '#f8f9fa',
+        borderRadius: '8px'
+      }}>
+        <h2 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '8px' }}>
+          Test Summary
+        </h2>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, 1fr)',
+          gap: '16px',
+          textAlign: 'center'
+        }}>
           <div>
-            <div className="text-2xl font-bold text-green-600">
+            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#28a745' }}>
               {Object.values(results).filter(r => r?.success).length}
             </div>
-            <div className="text-sm text-gray-600">Passed</div>
+            <div style={{ fontSize: '12px', color: '#666' }}>Passed</div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-red-600">
+            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#dc3545' }}>
               {Object.values(results).filter(r => r?.success === false).length}
             </div>
-            <div className="text-sm text-gray-600">Failed</div>
+            <div style={{ fontSize: '12px', color: '#666' }}>Failed</div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-blue-600">
+            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#0066cc' }}>
               {Object.values(loading).filter(Boolean).length}
             </div>
-            <div className="text-sm text-gray-600">Running</div>
+            <div style={{ fontSize: '12px', color: '#666' }}>Running</div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-gray-600">
+            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#666' }}>
               {Object.keys(results).length}
             </div>
-            <div className="text-sm text-gray-600">Total Tests</div>
+            <div style={{ fontSize: '12px', color: '#666' }}>Total Tests</div>
           </div>
         </div>
       </div>
