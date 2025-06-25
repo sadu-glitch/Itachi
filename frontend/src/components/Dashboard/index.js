@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import BudgetAllocationForm from './BudgetAllocationForm';
-import DepartmentOverview from './DepartmentOverview';
-import DepartmentDetail from './DepartmentDetail';
-import RegionDetail from './RegionDetail';
-import TransactionDetail from './TransactionDetail';
+import BudgetAllocationForm from './BudgetAllocationFormDB';
+import DepartmentOverview from './DepartmentOverviewDB';
+import DepartmentDetail from './DepartmentDetailDB';
+import RegionDetail from './RegionDetailDB';
+import TransactionDetail from './TransactionDetailDB';
 import { useDepartmentData } from '../../hooks/useDepartmentData';
 import { useTransactionData } from '../../hooks/useTransactionData';
 import { useBudgetProgress } from '../../hooks/useBudget';

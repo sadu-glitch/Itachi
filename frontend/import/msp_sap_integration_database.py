@@ -12,8 +12,6 @@ import time
 import pyodbc
 from sqlalchemy import create_engine, text
 from urllib.parse import quote_plus
-import os
-os.environ["DB_PASSWORD"] = "Blutwurst12345+"
 
 # [Your existing helper functions - keeping them unchanged]
 def safe_float_conversion(value):
@@ -26,14 +24,14 @@ def safe_float_conversion(value):
     if pd.isna(value):
         return 0.0
         
-    # Convert to string firsttt
+    # Convert to string first
     str_value = str(value).strip()
     
     # Return 0 for empty strings
     if not str_value:
         return 0.0
     
-    # Remove currency symbols and other non-numeric charactersss
+    # Remove currency symbols and other non-numeric characters
     # Keep only digits, comma, dot, minus sign
     cleaned = ""
     for char in str_value:
@@ -84,7 +82,7 @@ def safe_get(row, column, default=None):
         return default
     return row[column]
 
-# 1. Enhance the make_json_serializable function to better handle NaN values and circular references
+# Enhanced make_json_serializable function to better handle NaN values and circular references
 def make_json_serializable(obj, _seen=None):
     """
     Convert objects that are not JSON serializable to serializable formats
@@ -311,9 +309,15 @@ class DatabaseManager:
             # Read data using pandas
             df = pd.read_sql_query(query, self.engine)
             
+            # CRITICAL: Create a completely independent copy to break any database references
+            df = df.copy(deep=True)
+            
             # Apply column mapping if provided (to maintain compatibility with existing code)
             if column_mapping:
                 df = df.rename(columns=column_mapping)
+            
+            # CRITICAL: Reset index and ensure clean DataFrame
+            df = df.reset_index(drop=True)
             
             logger.info(f"Read {len(df)} records from {table_name}")
             return df
@@ -496,96 +500,18 @@ def save_to_database_as_json(table_name: str, data: Any) -> None:
     logger.info(f"Saving processed data to database table: {table_name}")
     
     try:
-        # Clean the data before JSON serialization to avoid circular references
-        logger.info("🧹 Cleaning data structure for JSON serialization...")
+        # STEP 1: Clean the data to remove circular references BEFORE JSON encoding
+        logger.info("🧹 Cleaning data to remove circular references...")
+        clean_data = make_json_serializable(data)
         
-        # Create a clean copy of the data
-        if isinstance(data, dict):
-            clean_data = {}
-            for key, value in data.items():
-                try:
-                    # For large nested structures, we need to be more careful
-                    if key in ['transactions', 'direct_costs', 'booked_measures', 'parked_measures']:
-                        # These are lists of transactions - clean each one
-                        if isinstance(value, list):
-                            clean_data[key] = []
-                            for item in value:
-                                if isinstance(item, dict):
-                                    clean_item = {}
-                                    for item_key, item_value in item.items():
-                                        # Skip problematic nested data that might cause circular refs
-                                        if item_key in ['msp_data', 'sap_data']:
-                                            # Convert pandas Series/DataFrame to simple dict
-                                            if hasattr(item_value, 'to_dict'):
-                                                try:
-                                                    clean_item[item_key] = item_value.to_dict()
-                                                except:
-                                                    clean_item[item_key] = str(item_value)
-                                            elif isinstance(item_value, dict):
-                                                # Clean nested dict
-                                                clean_nested = {}
-                                                for nk, nv in item_value.items():
-                                                    try:
-                                                        if pd.isna(nv):
-                                                            clean_nested[str(nk)] = None
-                                                        elif isinstance(nv, (int, float, str, bool, type(None))):
-                                                            clean_nested[str(nk)] = nv
-                                                        else:
-                                                            clean_nested[str(nk)] = str(nv)
-                                                    except:
-                                                        clean_nested[str(nk)] = str(nv) if nv is not None else None
-                                                clean_item[item_key] = clean_nested
-                                            else:
-                                                clean_item[item_key] = str(item_value) if item_value is not None else None
-                                        else:
-                                            # For regular fields, clean them normally
-                                            try:
-                                                if pd.isna(item_value):
-                                                    clean_item[item_key] = None
-                                                elif isinstance(item_value, (int, float, str, bool, type(None))):
-                                                    clean_item[item_key] = item_value
-                                                else:
-                                                    clean_item[item_key] = str(item_value)
-                                            except:
-                                                clean_item[item_key] = str(item_value) if item_value is not None else None
-                                    clean_data[key].append(clean_item)
-                                else:
-                                    clean_data[key].append(str(item) if item is not None else None)
-                        else:
-                            clean_data[key] = str(value) if value is not None else None
-                    else:
-                        # For other keys, handle normally
-                        try:
-                            if pd.isna(value):
-                                clean_data[key] = None
-                            elif isinstance(value, (int, float, str, bool, dict, list, type(None))):
-                                clean_data[key] = value
-                            else:
-                                clean_data[key] = str(value)
-                        except:
-                            clean_data[key] = str(value) if value is not None else None
-                except Exception as e:
-                    logger.warning(f"Issue cleaning key '{key}': {str(e)}")
-                    clean_data[key] = str(value) if value is not None else None
-        else:
-            clean_data = data
-        
-        # Convert to JSON string with the improved encoder
+        # STEP 2: Convert cleaned data to JSON string
         logger.info("📝 Converting to JSON...")
         json_data = json.dumps(clean_data, cls=JSONEncoder, separators=(',', ':'))
         
-        # Create timestamp for this processing run
+        # STEP 3: Create timestamp for this processing run
         timestamp = datetime.now()
         
-        # Prepare the data for insertion
-        record = {
-            'result_type': table_name,
-            'data': json_data,
-            'created_at': timestamp,
-            'processing_date': timestamp.isoformat()
-        }
-        
-        # Create results table if it doesn't exist
+        # STEP 4: Create results table if it doesn't exist
         create_results_table_query = text("""
             IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'processing_results')
             BEGIN
@@ -599,6 +525,7 @@ def save_to_database_as_json(table_name: str, data: Any) -> None:
             END
         """)
         
+        # STEP 5: Save to database
         with db_manager.engine.connect() as conn:
             # Create table if needed
             conn.execute(create_results_table_query)
@@ -622,11 +549,12 @@ def save_to_database_as_json(table_name: str, data: Any) -> None:
             })
             conn.commit()
             
-        logger.info(f"Successfully saved {table_name} to database")
+        logger.info(f"✅ Successfully saved {table_name} to database")
         
     except Exception as e:
-        logger.error(f"Error saving {table_name} to database: {str(e)}")
-        raise
+        logger.error(f"❌ Error saving {table_name} to database: {str(e)}")
+        # Don't re-raise the exception with undefined variables
+        raise Exception(f"Failed to save {table_name} to database: {str(e)}")
 
 def read_previous_processed_data() -> Dict:
     """
@@ -740,7 +668,18 @@ def generate_frontend_views_to_database(processed_data: Dict) -> None:
     # 1. Department-level view with location type
     departments = {}
     
-    for tx in processed_data['transactions']:
+    # SAFETY CHECK: Ensure transactions is a list and contains valid dictionaries
+    transactions = processed_data.get('transactions', [])
+    if not isinstance(transactions, list):
+        logger.error(f"Expected transactions to be a list, got {type(transactions)}")
+        transactions = []
+    
+    for tx in transactions:
+        # SAFETY CHECK: Ensure tx is a dictionary
+        if not isinstance(tx, dict):
+            logger.warning(f"Skipping invalid transaction item: {type(tx)} - {str(tx)[:100]}")
+            continue
+            
         # Get department with empty string fallback
         dept = tx.get('department', '')
         if not dept:
@@ -783,7 +722,11 @@ def generate_frontend_views_to_database(processed_data: Dict) -> None:
     # 2. Region-level view with location type
     regions = {}
     
-    for tx in processed_data['transactions']:
+    for tx in transactions:
+        # SAFETY CHECK: Ensure tx is a dictionary
+        if not isinstance(tx, dict):
+            continue
+            
         # Get region and department with empty string fallback
         region = tx.get('region', '')
         dept = tx.get('department', '')
@@ -830,7 +773,11 @@ def generate_frontend_views_to_database(processed_data: Dict) -> None:
     awaiting_assignment = {}
     
     # Look for UNASSIGNED_MEASURE transactions in all transactions (not just parked_measures)
-    for transaction in processed_data['transactions']:
+    for transaction in transactions:
+        # SAFETY CHECK: Ensure transaction is a dictionary
+        if not isinstance(transaction, dict):
+            continue
+            
         # FIXED: Look for UNASSIGNED_MEASURE category instead of checking status
         if transaction.get('category') != 'UNASSIGNED_MEASURE':
             continue
@@ -1471,7 +1418,7 @@ def infer_location_type_from_department(department: str) -> str:
     return 'Unknown'
 
 # -----------------------------------------------------------------------------
-# Cached helper functions (UNCHANGED)
+# Cached helper functions (FIXED - removed excessive logging)
 # -----------------------------------------------------------------------------
 
 @functools.lru_cache(maxsize=1024)
@@ -1532,9 +1479,6 @@ def map_kostenstelle_cached(kostenstelle: str, mapping_index: Dict[str, Location
         # Floor Kostenstelle - extract digits 2-6 (to get the 5 digits after the leading '3')
         # For example: 35020400 → 50204
         extracted_digits = kostenstelle[1:6]
-        
-        # Log for debugging
-        logger.info(f"Extracted Kostenstelle digits: {extracted_digits} from {kostenstelle}")
         
         # First try direct lookup
         result = mapping_index.get(extracted_digits)

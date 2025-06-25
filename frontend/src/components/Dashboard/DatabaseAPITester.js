@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 
 const DatabaseAPITester = () => {
@@ -18,6 +17,7 @@ const DatabaseAPITester = () => {
       method,
       headers: {
         'Content-Type': 'application/json',
+        'Accept': 'application/json', 
         'X-User-Name': 'Frontend Test User',
         'X-Change-Reason': 'Testing database integration',
         ...headers
@@ -26,11 +26,40 @@ const DatabaseAPITester = () => {
     
     if (body) {
       options.body = JSON.stringify(body);
+      console.log('Sending body:', options.body);  // ✅ Add debug log
     }
 
     const response = await fetch(url, options);
     const data = await response.json();
     return { status: response.status, data };
+  };
+
+  // 🔍 FIXED: Debug function (removed JSX from inside function)
+  const testDebugRequest = async () => {
+    setLoading(prev => ({ ...prev, debug: true }));
+    try {
+      const result = await apiCall('/api/debug-request', 'POST', testData);
+      console.log('Debug result:', result.data);
+      setResults(prev => ({ 
+        ...prev, 
+        debug: { 
+          success: result.status === 200, 
+          data: result.data,
+          message: 'Debug request completed'
+        }
+      }));
+    } catch (error) {
+      console.error('Debug failed:', error);
+      setResults(prev => ({ 
+        ...prev, 
+        debug: { 
+          success: false, 
+          error: error.message,
+          message: 'Debug request failed'
+        }
+      }));
+    }
+    setLoading(prev => ({ ...prev, debug: false }));
   };
 
   // Test functions
@@ -450,6 +479,46 @@ const DatabaseAPITester = () => {
             placeholder="District"
           />
         </div>
+      </div>
+
+      {/* 🔍 DEBUG SECTION - Add this before the main tests */}
+      <div style={{
+        marginBottom: '24px',
+        padding: '16px',
+        backgroundColor: '#fff8e1',
+        borderRadius: '8px',
+        border: '2px solid #ff9800'
+      }}>
+        <h2 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '8px', color: '#e65100' }}>
+          🔍 Debug Section
+        </h2>
+        <p style={{ fontSize: '14px', color: '#ef6c00', marginBottom: '12px' }}>
+          Use this to debug the assign/unassign issue
+        </p>
+        
+        <ResultCard
+          title="Debug Request"
+          result={results.debug}
+          isLoading={loading.debug}
+        />
+        
+        <button
+          onClick={testDebugRequest}
+          style={{
+            width: '100%',
+            padding: '12px 16px',
+            backgroundColor: '#ff9800',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            fontSize: '16px'
+          }}
+          disabled={loading.debug}
+        >
+          🔍 Debug Request Data
+        </button>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>

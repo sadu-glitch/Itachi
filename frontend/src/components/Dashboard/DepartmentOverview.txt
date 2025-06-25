@@ -1,24 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar
 } from 'recharts';
 import { formatCurrency } from '../../utils/formatters';
 import { useBudgetProgress } from '../../hooks/useBudget';
-// At the top of any component file (like DepartmentOverview.js)
-import DatabaseAPITester from './TEST';
-
-// Then temporarily add this anywhere in your render:
-const [showTest, setShowTest] = useState(false);
-
-// In your JSX:
-<div>
-  <button onClick={() => setShowTest(!showTest)}>
-    Toggle API Test
-  </button>
-  {showTest && <DatabaseAPITester />}
-  
-  {/* Your existing component content */}
-</div>
+import DatabaseAPITester from './DatabaseAPITester'; // ✅ FIXED: Correct import
 
 // ✅ NEW: Custom XAxis tick component for wrapped text
 const CustomXAxisTick = ({ x, y, payload }) => {
@@ -66,18 +52,24 @@ const CustomXAxisTick = ({ x, y, payload }) => {
 };
 
 /**
- * Enhanced Department Overview with budget allocation data
+ * Enhanced Department Overview with budget allocation data and integrated API testing
  * @param {Object} props
  * @param {Array} props.departments - Array of department data
  * @param {Function} props.onDepartmentClick - Handler for department selection
  * @param {string} props.baseApiUrl - Base API URL for budget data fetching
  */
 const DepartmentOverview = ({ departments, onDepartmentClick, baseApiUrl }) => {
-  // ✅ FIXED: Fetch budget data directly instead of relying on props
+  // ✅ FIXED: Always call hooks unconditionally at top level
   const { getDepartmentBudget } = useBudgetProgress(baseApiUrl);
+  
+  // ✅ FIXED: useState called inside component function
+  const [showTest, setShowTest] = useState(false);
+
+  // ✅ FIXED: Handle case where departments prop might be undefined
+  const safeDepartments = departments || [];
 
   // Group departments by location_type and enhance with budget data
-  const groupedDepartments = departments.reduce((acc, dept) => {
+  const groupedDepartments = safeDepartments.reduce((acc, dept) => {
     const group = dept.location_type || 'Other';
     if (!acc[group]) acc[group] = [];
     
@@ -147,10 +139,65 @@ const DepartmentOverview = ({ departments, onDepartmentClick, baseApiUrl }) => {
     <div className="budget-summary" style={{ maxWidth: '100%' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <h3 style={{ margin: 0 }}>Department Budget Overview</h3>
-        <div style={{ fontSize: '12px', color: '#666' }}>
-          Click on any department to view details
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          {/* ✅ ENHANCED: Database API Test Button */}
+          <button 
+            onClick={() => setShowTest(!showTest)}
+            style={{ 
+              padding: '8px 12px', 
+              fontSize: '12px', 
+              backgroundColor: showTest ? '#dc3545' : '#0078d4', 
+              color: 'white', 
+              border: 'none', 
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: '500',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}
+          >
+            {showTest ? '❌ Hide Database Test' : '🗄️ Test Database API'}
+          </button>
+          <div style={{ fontSize: '12px', color: '#666' }}>
+            Click on any department to view details
+          </div>
         </div>
       </div>
+
+      {/* ✅ INTEGRATED: DatabaseAPITester Component */}
+      {showTest && (
+        <div style={{ 
+          marginBottom: '24px',
+          padding: '20px', 
+          backgroundColor: '#f8f9fa', 
+          border: '2px solid #0078d4', 
+          borderRadius: '8px',
+          boxShadow: '0 4px 8px rgba(0,0,0,0.1)'
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            marginBottom: '16px',
+            paddingBottom: '12px',
+            borderBottom: '1px solid #dee2e6'
+          }}>
+            <span style={{ fontSize: '24px' }}>🗄️</span>
+            <div>
+              <h4 style={{ margin: 0, color: '#0078d4', fontSize: '18px' }}>
+                Database API Testing Panel
+              </h4>
+              <p style={{ margin: 0, fontSize: '12px', color: '#666' }}>
+                Compare database API responses with current dashboard data • API URL: {baseApiUrl || 'Not configured'}
+              </p>
+            </div>
+          </div>
+          
+          {/* Pass the same baseApiUrl for consistency */}
+          <DatabaseAPITester defaultApiUrl={baseApiUrl} />
+        </div>
+      )}
 
       {Object.entries(groupedDepartments).map(([locationType, depts]) => {
         const chartData = depts.map(dept => ({
@@ -248,7 +295,7 @@ const DepartmentOverview = ({ departments, onDepartmentClick, baseApiUrl }) => {
                     data={chartData}
                     margin={{ top: 20, right: 30, left: 40, bottom: 120 }} // ✅ MORE bottom space for wrapped labels
                     onClick={(data) => {
-                      if (data && data.activePayload) {
+                      if (data && data.activePayload && onDepartmentClick) {
                         onDepartmentClick(data.activePayload[0].payload.originalDept);
                       }
                     }}
@@ -316,12 +363,10 @@ const DepartmentOverview = ({ departments, onDepartmentClick, baseApiUrl }) => {
               </div>
 
               {depts.map(dept => {
-                //const remaining = (dept.allocated_budget || 0) - (dept.total_amount || 0);
-                
                 return (
                   <div
                     key={dept.name}
-                    onClick={() => onDepartmentClick(dept)}
+                    onClick={() => onDepartmentClick && onDepartmentClick(dept)}
                     style={{ 
                       cursor: 'pointer',
                       display: 'grid',
@@ -340,7 +385,7 @@ const DepartmentOverview = ({ departments, onDepartmentClick, baseApiUrl }) => {
                     }}
                   >
                     <div style={{ fontWeight: '500' }} title={dept.name}>
-                      {dept.name} {/* ✅ FIXED: Show full name in table */}
+                      {dept.name}
                     </div>
                     <div style={{ 
                       color: dept.allocated_budget > 0 ? '#107c10' : '#999',
@@ -349,13 +394,13 @@ const DepartmentOverview = ({ departments, onDepartmentClick, baseApiUrl }) => {
                       {dept.allocated_budget > 0 ? formatCurrency(dept.allocated_budget) : 'Not Set'}
                     </div>
                     <div style={{ color: '#dc3545', fontWeight: 'bold' }}>
-                      {formatCurrency(dept.booked_amount)}
+                      {formatCurrency(dept.booked_amount || 0)}
                     </div>
                     <div style={{ color: '#ffc107', fontWeight: 'bold' }}>
-                      {formatCurrency(dept.reserved_amount)}
+                      {formatCurrency(dept.reserved_amount || 0)}
                     </div>
                     <div style={{ fontWeight: 'bold' }}>
-                      {formatCurrency(dept.total_amount)}
+                      {formatCurrency(dept.total_amount || 0)}
                     </div>
                     <div style={{ 
                       fontWeight: 'bold',

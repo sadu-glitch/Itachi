@@ -608,25 +608,51 @@ def get_budget_summary(entity_key):
         logger.error(f"Error getting budget summary: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+# Replace your database API's /api/assign-measure endpoint with this corrected version:
+
 @app.route('/api/assign-measure', methods=['POST'])
 def assign_measure():
     """Manually assign a parked measure to a region/district, or unassign"""
     try:
+        logger.info(f"=== ASSIGN MEASURE DEBUG ===")
+        logger.info(f"Content-Type: {request.content_type}")
+        logger.info(f"Raw data: {request.data}")
+        logger.info(f"Raw data type: {type(request.data)}")
+        
         assignment = request.get_json()
         
+        logger.info(f"Parsed assignment: {assignment}")
+        logger.info(f"Assignment type: {type(assignment)}")
+        logger.info(f"=== END DEBUG ===")
+
+        # Validate data structure
+        if not isinstance(assignment, dict):
+            logger.error(f"❌ Invalid data type received: {type(assignment)}")
+            return jsonify({
+                "status": "error", 
+                "message": f"Expected dict, got {type(assignment)}",
+                "received_data": str(assignment)
+            }), 400
+
         # Check if this is an unassign operation
         is_unassign = (assignment.get('region') == '' and assignment.get('district') == '') or assignment.get('unassign', False)
         
         # Validate required fields
         if not is_unassign:
             required_fields = ['bestellnummer', 'region', 'district']
-            for field in required_fields:
-                if field not in assignment or not assignment[field]:
-                    return jsonify({"status": "error", "message": f"Missing required field: {field}"}), 400
+            missing_fields = [field for field in required_fields if field not in assignment or not assignment[field]]
+            if missing_fields:
+                return jsonify({
+                    "status": "error", 
+                    "message": f"Missing required fields: {', '.join(missing_fields)}"
+                }), 400
         else:
             # For unassign, only bestellnummer is required
             if 'bestellnummer' not in assignment:
-                return jsonify({"status": "error", "message": "Missing required field: bestellnummer"}), 400
+                return jsonify({
+                    "status": "error", 
+                    "message": "Missing required field: bestellnummer"
+                }), 400
         
         # Get the current transactions from database
         transactions = get_processed_data_from_database("transactions")
@@ -663,7 +689,7 @@ def assign_measure():
             action_message = f"Measure {assignment['bestellnummer']} moved back to awaiting assignment"
             
         else:
-            # Normal assign logic
+            # ✅ FIXED: Normal assign logic - EXACTLY like blob storage
             for measure in transactions['parked_measures']:
                 if measure['bestellnummer'] == assignment['bestellnummer']:
                     measure_found = True
@@ -675,21 +701,31 @@ def assign_measure():
                     measure['district'] = assignment['district']
                     measure['status'] = 'Manually assigned, awaiting SAP'
                     
-                    # Also update in the transactions list
+                    # ✅ CRITICAL: Update category in parked_measures
+                    if measure.get('category') == 'UNASSIGNED_MEASURE':
+                        measure['category'] = 'PARKED_MEASURE'
+                    
+                    # ✅ CRITICAL: Also update in the transactions list - EXACTLY like blob storage
                     for tx in transactions['transactions']:
                         if tx.get('bestellnummer') == assignment['bestellnummer']:
                             tx['manual_assignment'] = measure['manual_assignment']
                             tx['region'] = assignment['region']
                             tx['district'] = assignment['district']
                             tx['status'] = 'Manually assigned, awaiting SAP'
+                            
+                            # ✅ CRITICAL: This was missing in database version!
                             if tx.get('category') == 'UNASSIGNED_MEASURE':
                                 tx['category'] = 'PARKED_MEASURE'
+                            break
                     break
                     
             action_message = f"Measure {assignment['bestellnummer']} assigned to {assignment['region']}/{assignment['district']}"
         
         if not measure_found:
-            return jsonify({"status": "error", "message": f"Measure with bestellnummer {assignment['bestellnummer']} not found"}), 404
+            return jsonify({
+                "status": "error", 
+                "message": f"Measure with bestellnummer {assignment['bestellnummer']} not found"
+            }), 404
         
         # Save updated transactions to database
         save_to_database_as_json("transactions", transactions)
@@ -704,6 +740,9 @@ def assign_measure():
         
     except Exception as e:
         logger.error(f"Error in assign/unassign measure: {str(e)}")
+        logger.error(f"Exception type: {type(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/bulk-assign-measures', methods=['POST'])
@@ -1048,6 +1087,29 @@ def test_department(dept_name):
         "test": "Database API route is working",
         "version": "2.0.0"
     })
+
+@app.route('/api/debug-request', methods=['POST'])
+def debug_request():
+    """Debug endpoint to see exactly what data is being received"""
+    try:
+        return jsonify({
+            "content_type": request.content_type,
+            "raw_data": str(request.data),
+            "raw_data_type": str(type(request.data)),
+            "get_json_result": request.get_json(),
+            "get_json_type": str(type(request.get_json())),
+            "headers": dict(request.headers),
+            "method": request.method,
+            "debug_info": "This endpoint helps debug the data structure issue"
+        })
+    except Exception as e:
+        return jsonify({
+            "error": str(e),
+            "error_type": str(type(e)),
+            "raw_data": str(request.data),
+            "content_type": request.content_type,
+            "debug_info": "Error occurred during debugging"
+        })
 
 if __name__ == '__main__':
     # Check if database password is set before starting

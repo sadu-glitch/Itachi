@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 
 /**
- * Component to display region detail view with transactions and reversible assignments
+ * Component to display region detail view with transactions and reversible assignments. THIS COMPONENT WAS AGNOSTIC AND THEREFORE DID NOT NEED DATABASE CONVERSION (SO NO TXT. file)
  */
 const RegionDetail = ({
   selectedDepartment,
@@ -76,6 +76,48 @@ const RegionDetail = ({
       }
     });
 
+    console.log('🔍 DEBUG: RegionDetail rendering for region:', selectedRegion);
+console.log('🔍 DEBUG: Total transactions received:', transactions.length);
+
+// Debug: Check all transactions for this region
+const allRegionTransactions = transactions.filter(tx => tx.region === selectedRegion);
+console.log('🔍 DEBUG: All transactions in region:', allRegionTransactions.length);
+
+// Debug: Check different categories in this region
+const categoriesInRegion = {};
+allRegionTransactions.forEach(tx => {
+  const cat = tx.category || 'NO_CATEGORY';
+  if (!categoriesInRegion[cat]) categoriesInRegion[cat] = 0;
+  categoriesInRegion[cat]++;
+});
+console.log('🔍 DEBUG: Categories in region:', categoriesInRegion);
+
+// Debug: Check different statuses in this region
+const statusesInRegion = {};
+allRegionTransactions.forEach(tx => {
+  const status = tx.status || 'NO_STATUS';
+  if (!statusesInRegion[status]) statusesInRegion[status] = 0;
+  statusesInRegion[status]++;
+});
+console.log('🔍 DEBUG: Statuses in region:', statusesInRegion);
+
+// Debug: Check manually assigned measures specifically
+const debugManuallyAssigned = transactions.filter(tx => 
+  tx.region === selectedRegion && tx.manual_assignment
+);
+console.log('🔍 DEBUG: Transactions with manual_assignment in region:', debugManuallyAssigned.length);
+
+// Debug: Show sample data
+if (debugManuallyAssigned.length > 0) {
+  console.log('🔍 DEBUG: Sample manually assigned measure:', {
+    bestellnummer: debugManuallyAssigned[0].bestellnummer,
+    category: debugManuallyAssigned[0].category,
+    status: debugManuallyAssigned[0].status,
+    region: debugManuallyAssigned[0].region,
+    manual_assignment: debugManuallyAssigned[0].manual_assignment
+  });
+}
+
     return {
       allocated: allocatedBudget,
       booked: bookedAmount,
@@ -93,12 +135,12 @@ const RegionDetail = ({
   }, [transactions, selectedRegion, regionBudgetData]);
 
   // Filter transactions to find manually assigned measures for this region
-  const manuallyAssignedMeasures = transactions.filter(tx => 
-    tx.category === 'PARKED_MEASURE' && 
-    tx.status === 'Manually assigned, awaiting SAP' &&
-    tx.region === selectedRegion &&
-    tx.manual_assignment
-  );
+  
+    const manuallyAssignedMeasures = transactions.filter(tx => 
+  tx.region === selectedRegion &&
+  tx.manual_assignment && 
+  (tx.category === 'PARKED_MEASURE' || tx.status === 'Manually assigned, awaiting SAP')
+);
 
   // All other transactions (booked, direct costs, etc.)
   const regularTransactions = transactions.filter(tx => 

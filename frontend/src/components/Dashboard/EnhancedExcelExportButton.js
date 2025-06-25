@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import * as XLSX from 'xlsx';
+import { useBudgetProgress } from '../../hooks/useBudget'; // ✅ FIXED: Direct import
 
 /**
  * Enhanced Component for Excel export button with department selection and budget integration
@@ -9,30 +10,19 @@ import * as XLSX from 'xlsx';
  * @param {Array} props.regions - Array of region data
  * @param {Array} props.transactions - All transactions data
  * @param {string} props.baseApiUrl - Base API URL for budget data fetching
- * @param {Function} props.useBudgetProgress - Budget hook function (required for proper budget lookup)
  */
 const EnhancedExcelExportButton = ({ 
   departments = [], 
   regions = [], 
   transactions = [], 
-  baseApiUrl = '',
-  useBudgetProgress = null // ✅ Default to null instead of undefined
+  baseApiUrl = ''
 }) => {
   const [showModal, setShowModal] = useState(false);
   const [selectedDepartments, setSelectedDepartments] = useState(new Set());
   const [loading, setLoading] = useState(false);
 
-  // ✅ FIXED: Create a safe hook caller that always returns consistent structure
-  const safeBudgetHook = useBudgetProgress || (() => ({
-    getDepartmentBudget: null,
-    getDepartmentProgress: null, 
-    getRegionalProgress: null,
-    loading: false,
-    budgetData: null
-  }));
-
-  // ✅ FIXED: Always call a hook (either the real one or the safe fallback)
-  const budgetHookResult = safeBudgetHook(baseApiUrl);
+  // ✅ FIXED: Always call the hook directly and unconditionally
+  const budgetHookResult = useBudgetProgress(baseApiUrl);
 
   // ✅ FIXED: Extract budget functions safely (they might be undefined)
   const getDepartmentBudget = budgetHookResult?.getDepartmentBudget;
@@ -307,7 +297,7 @@ const EnhancedExcelExportButton = ({
       // Add summary header
       budgetSummaryData.push(['BUDGET-ZUSAMMENFASSUNG', '', '', '', '', '', '']);
       budgetSummaryData.push(['Erstellt am:', new Date().toLocaleDateString('de-DE'), '', '', '', '', '']);
-      budgetSummaryData.push(['Budget-System:', budgetHook ? 'Verbunden' : 'Nicht verfügbar', '', '', '', '', '']);
+      budgetSummaryData.push(['Budget-System:', budgetHookResult ? 'Verbunden' : 'Nicht verfügbar', '', '', '', '', '']);
       budgetSummaryData.push(['', '', '', '', '', '', '']);
       
       // Calculate totals
