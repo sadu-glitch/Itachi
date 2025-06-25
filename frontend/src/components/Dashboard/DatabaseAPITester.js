@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 const DatabaseAPITester = () => {
   const [results, setResults] = useState({});
   const [loading, setLoading] = useState({});
-  const [apiUrl, setApiUrl] = useState('http://localhost:5001'); // Database API
+  const [apiUrl, setApiUrl] = useState('https://msp-sap-api2-h5dmf6e6d4fngcbf.germanywestcentral-01.azurewebsites.net'); // Database API
   const [testData, setTestData] = useState({
     bestellnummer: 3597,
     region: 'Stuttgart',

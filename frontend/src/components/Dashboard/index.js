@@ -20,7 +20,7 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
   const [error, setError] = useState(null);
   
   // Get the base API URL - use provided apiUrl or fall back to localhost for development
-  const baseApiUrl = apiUrl || 'http://localhost:5000';
+  const baseApiUrl = apiUrl || 'https://msp-sap-api2-h5dmf6e6d4fngcbf.germanywestcentral-01.azurewebsites.net';
   
   // Use custom hooks for data fetching
   const { 
