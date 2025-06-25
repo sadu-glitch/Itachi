@@ -427,7 +427,7 @@ const DatabaseAPITester = () => {
               border: '1px solid #ccc',
               borderRadius: '4px'
             }}
-            placeholder="API URL (e.g., http://localhost:5001)"
+            placeholder="API URL (e.g., https://msp-sap-api2-h5dmf6e6d4fngcbf.germanywestcentral-01.azurewebsites.net)"
           />
           <button
             onClick={runAllTests}
