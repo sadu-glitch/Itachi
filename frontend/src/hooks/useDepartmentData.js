@@ -39,13 +39,53 @@ export const useDepartmentData = (baseApiUrl) => {
         regionsIsArray: Array.isArray(data.regions)
       });
       
-      // ✅ FIXED: Directly store the data structure as received from API
+      // ✅ FIXED: Handle object structure from your API
+      // Your API returns departments as an object, not array
+      const extractDepartments = (deptData) => {
+        if (Array.isArray(deptData)) {
+          return deptData;
+        }
+        if (deptData && typeof deptData === 'object') {
+          // If it's an object with a departments key
+          if (deptData.departments && Array.isArray(deptData.departments)) {
+            return deptData.departments;
+          }
+          // If it's an object where values are the departments
+          const values = Object.values(deptData);
+          if (values.length > 0 && typeof values[0] === 'object' && values[0].name) {
+            return values;
+          }
+        }
+        return [];
+      };
+
+      const extractRegions = (regData) => {
+        if (Array.isArray(regData)) {
+          return regData;
+        }
+        if (regData && typeof regData === 'object') {
+          // If it's an object with a regions key
+          if (regData.regions && Array.isArray(regData.regions)) {
+            return regData.regions;
+          }
+          // If it's an object where values are the regions
+          const values = Object.values(regData);
+          if (values.length > 0 && typeof values[0] === 'object' && values[0].name) {
+            return values;
+          }
+        }
+        return [];
+      };
+
+      const departmentsArray = extractDepartments(data.departments);
+      const regionsArray = extractRegions(data.regions);
+
       setDepartmentsData({
-        departments: Array.isArray(data.departments) ? data.departments : []
+        departments: departmentsArray
       });
       
       setRegionsData({
-        regions: Array.isArray(data.regions) ? data.regions : []
+        regions: regionsArray
       });
       
       setLoading(false);
