@@ -18,14 +18,18 @@ function App() {
     const fetchData = async () => {
       try {
         setLoading(true);
-        // Use relative URL - Azure Static Web Apps automatically routes /api/* to your API
         const response = await fetch('/api/data');
+        
+        // Add this debug line to see what we're actually getting
+        const textResponse = await response.text();
+        console.log('Raw response:', textResponse);
         
         if (!response.ok) {
           throw new Error(`API request failed with status ${response.status}`);
         }
         
-        const data = await response.json();
+        // Try to parse as JSON
+        const data = JSON.parse(textResponse);
         setApiData(data);
         setLoading(false);
       } catch (err) {
@@ -52,7 +56,7 @@ function App() {
             stats={apiData.transaction_stats} 
             budgetData={apiData.budget_allocation} 
             awaitingAssignment={apiData.awaiting_assignment}
-            apiUrl=""  // Pass empty string or remove this prop
+            apiUrl=""
           />
         </>
       )}
