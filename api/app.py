@@ -8,85 +8,87 @@ import pandas as pd
 import tempfile
 from datetime import datetime
 import logging
-from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
-import unicodedata
 from urllib.parse import unquote
 
-import os
-import sys
-
-# Try to import directly first (from API folder)
+# Database-integrated imports
 try:
-    from msp_sap_integration_fixed import (
+    from msp_sap_integration_database import (
         safe_float_conversion, 
         JSONEncoder,
-        read_from_blob, 
-        save_to_blob, 
-        generate_frontend_views
+        DatabaseManager,
+        get_processed_data_from_database,
+        save_to_database_as_json,
+        generate_frontend_views_to_database,
+        main as process_data_main
     )
 except ImportError:
     # Fall back to shared folder if not found
     sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'shared'))
-    from msp_sap_integration_fixed import (
+    from msp_sap_integration_database import (
         safe_float_conversion, 
         JSONEncoder,
-        read_from_blob, 
-        save_to_blob, 
-        generate_frontend_views
+        DatabaseManager,
+        get_processed_data_from_database,
+        save_to_database_as_json,
+        generate_frontend_views_to_database,
+        main as process_data_main
     )
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routesS
+CORS(app)  # Enable CORS for all routes
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("msp_sap_api")
+logger = logging.getLogger("msp_sap_api_db")
 
-# Azure Storage credentials
-MOCK_DATA_SAS_URL = "https://financedatastore.blob.core.windows.net/mock-data?sp=racwdli&st=2025-05-05T14:24:17Z&se=2026-12-30T23:24:17Z&spr=https&sv=2024-11-04&sr=c&sig=4qw%2BrpMKNCvKzNAN0%2FIaeS%2BU0Qenb1YhJDhpJDaVMC0%3D"
-PROCESSED_DATA_SAS_URL = "https://financedatastore.blob.core.windows.net/processed-data?sp=racwdli&st=2025-05-05T14:27:31Z&se=2026-08-30T22:27:31Z&spr=https&sv=2024-11-04&sr=c&sig=3OHdNWWQ%2FRuGyxebi8746XC1%2F1Cc3uzld9wjrdFIfL0%3D"
+# Initialize database manager (will be set up when first used)
+db_manager = None
 
-# Create BlobServiceClient objects for each container
-mock_data_container_client = ContainerClient.from_container_url(MOCK_DATA_SAS_URL)
-processed_data_container_client = ContainerClient.from_container_url(PROCESSED_DATA_SAS_URL)
+def get_db_manager():
+    """Get or create database manager instance"""
+    global db_manager
+    if db_manager is None:
+        db_manager = DatabaseManager()
+    return db_manager
 
 @app.route('/')
 def home():
     """Home endpoint"""
     return {
         "status": "online",
-        "service": "MSP-SAP Integration API",
-        "version": "1.0.0",
+        "service": "MSP-SAP Integration API (Database Version)",
+        "version": "2.0.0",
+        "storage": "Azure SQL Database",
         "timestamp": datetime.now().isoformat()
     }
 
 @app.route('/api/data', methods=['GET'])
 def get_data():
-    """Retrieve all processed data for the frontend"""
+    """Retrieve all processed data for the frontend from database"""
     try:
-        # Read all the processed data files
+        # Read all the processed data from database
         try:
-            transactions = read_from_blob("processed-data", "transactions.json", as_json=True)
+            transactions = get_processed_data_from_database("transactions")
         except Exception as e:
             transactions = {"error": str(e), "message": "Could not read transactions data"}
             
         try:
-            departments = read_from_blob("processed-data", "frontend_departments.json", as_json=True)
+            departments = get_processed_data_from_database("frontend_departments")
         except Exception as e:
             departments = {"error": str(e), "message": "Could not read departments data"}
         
         try:
-            regions = read_from_blob("processed-data", "frontend_regions.json", as_json=True)
+            regions = get_processed_data_from_database("frontend_regions")
         except Exception as e:
             regions = {"error": str(e), "message": "Could not read regions data"}
         
         try:
-            awaiting = read_from_blob("processed-data", "frontend_awaiting_assignment.json", as_json=True)
+            awaiting = get_processed_data_from_database("frontend_awaiting_assignment")
         except Exception as e:
             awaiting = {"error": str(e), "message": "Could not read awaiting assignment data"}
         
         try:
-            budgets = read_from_blob("processed-data", "budget_allocation.json", as_json=True)
+            budgets = get_processed_data_from_database("budget_allocation")
         except Exception as e:
             budgets = {"error": str(e), "message": "Could not read budget allocation data"}
         
@@ -104,9 +106,9 @@ def get_data():
 
 @app.route('/api/transactions', methods=['GET'])
 def get_transactions():
-    """Get all transactions (can be filtered)"""
+    """Get all transactions (can be filtered) from database"""
     try:
-        transactions = read_from_blob("processed-data", "transactions.json", as_json=True)
+        transactions = get_processed_data_from_database("transactions")
         
         # Extract query parameters for filtering
         category = request.args.get('category')
@@ -140,11 +142,11 @@ def get_transactions():
 
 @app.route('/api/budget-allocation', methods=['GET', 'POST'])
 def budget_allocation():
-    """Get or update budget allocations with CONSOLIDATED AUDIT TRAIL"""
+    """Get or update budget allocations with database storage and audit trail"""
     try:
         if request.method == 'GET':
             try:
-                budgets = read_from_blob("processed-data", "budget_allocation.json", as_json=True)
+                budgets = get_processed_data_from_database("budget_allocation")
                 logger.info(f"📊 Returning budget data with {len(budgets.get('departments', {}))} departments")
                 return jsonify(budgets)
             except Exception as e:
@@ -169,7 +171,7 @@ def budget_allocation():
             user_name = request.headers.get('X-User-Name', 'Unknown User')
             change_reason = request.headers.get('X-Change-Reason', 'Budget allocation update')
             user_ip = request.remote_addr
-            user_agent = request.headers.get('User-Agent', 'Unknown Browser')[:100]  # Truncate long user agents
+            user_agent = request.headers.get('User-Agent', 'Unknown Browser')[:100]
             
             # Create unique user ID and change ID
             user_id = f"user_{user_name.replace(' ', '_').lower()}_{int(datetime.now().timestamp())}"
@@ -177,18 +179,18 @@ def budget_allocation():
             
             logger.info(f"🔄 Budget update request from: {user_name} ({user_ip})")
             
-            # Load existing data
+            # Load existing data from database
             try:
-                existing_budgets = read_from_blob("processed-data", "budget_allocation.json", as_json=True)
+                existing_budgets = get_processed_data_from_database("budget_allocation")
                 logger.info(f"✅ Loaded existing budget file")
             except Exception as e:
                 logger.info(f"📝 Creating new budget file: {str(e)}")
                 existing_budgets = {}
             
-            # SAFETY: Create consolidated backup before any changes
-            backup_success = create_consolidated_backup(existing_budgets, change_id, user_name)
+            # SAFETY: Create backup before any changes
+            backup_success = create_database_backup(existing_budgets, change_id, user_name)
             if backup_success:
-                logger.info(f"🔒 SAFETY: Created consolidated backup for change {change_id}")
+                logger.info(f"🔒 SAFETY: Created database backup for change {change_id}")
             
             # Ensure structure exists
             if 'departments' not in existing_budgets or existing_budgets['departments'] is None:
@@ -221,12 +223,12 @@ def budget_allocation():
                         'change_type': 'department_budget',
                         'entity_type': 'department',
                         'entity_key': new_dept_name,
-                        'entity_name': new_dept_name.split('|')[0],  # Department name without location type
+                        'entity_name': new_dept_name.split('|')[0],
                         'old_value': old_budget,
                         'new_value': new_budget,
                         'change_amount': new_budget - old_budget,
                         'change_reason': change_reason,
-                        'backup_reference': change_id  # Reference to backup in consolidated file
+                        'backup_reference': change_id
                     }
                     audit_entries.append(audit_entry)
                     
@@ -258,7 +260,7 @@ def budget_allocation():
                                 'change_type': 'region_budget',
                                 'entity_type': 'region',
                                 'entity_key': existing_region_key,
-                                'entity_name': existing_region_key.split('|')[1],  # Region name
+                                'entity_name': existing_region_key.split('|')[1],
                                 'old_value': old_region_budget,
                                 'new_value': 0,
                                 'change_amount': -old_region_budget,
@@ -292,7 +294,7 @@ def budget_allocation():
                         'change_type': 'region_budget',
                         'entity_type': 'region',
                         'entity_key': new_region_key,
-                        'entity_name': new_region_key.split('|')[1],  # Region name
+                        'entity_name': new_region_key.split('|')[1],
                         'old_value': 0,
                         'new_value': new_region_budget,
                         'change_amount': new_region_budget,
@@ -315,19 +317,19 @@ def budget_allocation():
                 'change_reason': change_reason
             }
             
-            # Save the updated budget data
+            # Save the updated budget data to database
             try:
-                save_to_blob("processed-data", "budget_allocation.json", existing_budgets)
-                logger.info(f"💾 Successfully saved budget data")
+                save_to_database_as_json("budget_allocation", existing_budgets)
+                logger.info(f"💾 Successfully saved budget data to database")
                 
             except Exception as save_error:
                 logger.error(f"❌ CRITICAL: Failed to save budget data: {str(save_error)}")
                 return jsonify({"status": "error", "message": f"Failed to save: {str(save_error)}"}), 500
             
-            # AUDIT: Save consolidated audit trail if there were any changes
+            # AUDIT: Save audit trail if there were any changes
             if audit_entries:
                 try:
-                    save_consolidated_audit_trail(audit_entries)
+                    save_database_audit_trail(audit_entries)
                     logger.info(f"📋 AUDIT: Saved {len(audit_entries)} audit entries for change {change_id}")
                 except Exception as audit_error:
                     logger.error(f"❌ Failed to save audit trail: {str(audit_error)}")
@@ -348,24 +350,24 @@ def budget_allocation():
         logger.error(f"❌ Budget allocation error: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-def save_consolidated_audit_trail(audit_entries):
-    """Save audit trail entries to a single consolidated file"""
+def save_database_audit_trail(audit_entries):
+    """Save audit trail entries to database"""
     try:
-        # Load existing consolidated audit trail
+        # Load existing audit trail from database
         try:
-            existing_audit = read_from_blob("processed-data", "budget_audit_trail_consolidated.json", as_json=True)
+            existing_audit = get_processed_data_from_database("budget_audit_trail_consolidated")
             if 'entries' not in existing_audit:
                 existing_audit['entries'] = []
             if 'metadata' not in existing_audit:
                 existing_audit['metadata'] = {}
         except Exception as e:
-            logger.info(f"Creating new consolidated audit trail file: {str(e)}")
+            logger.info(f"Creating new audit trail: {str(e)}")
             existing_audit = {
                 'entries': [],
                 'metadata': {
                     'created': datetime.now().isoformat(),
                     'total_changes': 0,
-                    'file_description': 'Consolidated budget audit trail - all changes in one file'
+                    'file_description': 'Database-stored budget audit trail'
                 }
             }
         
@@ -377,73 +379,40 @@ def save_consolidated_audit_trail(audit_entries):
         existing_audit['metadata']['total_entries'] = len(existing_audit['entries'])
         existing_audit['metadata']['total_changes'] = existing_audit['metadata'].get('total_changes', 0) + len(audit_entries)
         
-        # Keep only the most recent 1000 entries to manage file size
+        # Keep only the most recent 1000 entries to manage size
         max_entries = 1000
         if len(existing_audit['entries']) > max_entries:
-            archived_entries = existing_audit['entries'][max_entries:]
             existing_audit['entries'] = existing_audit['entries'][:max_entries]
-            
-            # Save archived entries to a separate file
-            save_archived_audit_entries(archived_entries)
-            
-            existing_audit['metadata']['archived_entries'] = len(archived_entries)
+            existing_audit['metadata']['archived_entries'] = len(existing_audit['entries']) - max_entries
             existing_audit['metadata']['last_archive_date'] = datetime.now().isoformat()
-            logger.info(f"📦 Archived {len(archived_entries)} old audit entries")
+            logger.info(f"📦 Trimmed audit trail to {max_entries} entries")
         
-        # Save updated consolidated audit trail
-        save_to_blob("processed-data", "budget_audit_trail_consolidated.json", existing_audit)
+        # Save updated audit trail to database
+        save_to_database_as_json("budget_audit_trail_consolidated", existing_audit)
         
-        logger.info(f"✅ Consolidated audit trail updated with {len(audit_entries)} new entries")
+        logger.info(f"✅ Database audit trail updated with {len(audit_entries)} new entries")
         
     except Exception as e:
-        logger.error(f"❌ Failed to save consolidated audit trail: {str(e)}")
+        logger.error(f"❌ Failed to save database audit trail: {str(e)}")
         raise
 
-def save_archived_audit_entries(archived_entries):
-    """Save archived audit entries to a separate archive file"""
+def create_database_backup(current_data, change_id, user_name):
+    """Create backup in database"""
     try:
-        # Load existing archive
+        # Load existing backup data from database
         try:
-            archive = read_from_blob("processed-data", "budget_audit_archive.json", as_json=True)
-            if 'entries' not in archive:
-                archive['entries'] = []
-        except:
-            archive = {
-                'entries': [],
-                'metadata': {
-                    'created': datetime.now().isoformat(),
-                    'description': 'Archived budget audit entries - older entries moved from main file'
-                }
-            }
-        
-        # Add archived entries
-        archive['entries'].extend(archived_entries)
-        archive['metadata']['last_updated'] = datetime.now().isoformat()
-        archive['metadata']['total_archived_entries'] = len(archive['entries'])
-        
-        # Save archive
-        save_to_blob("processed-data", "budget_audit_archive.json", archive)
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to save archived audit entries: {str(e)}")
-
-def create_consolidated_backup(current_data, change_id, user_name):
-    """Add backup snapshot to consolidated backup file instead of creating separate files"""
-    try:
-        # Load existing consolidated backup file
-        try:
-            backup_data = read_from_blob("processed-data", "budget_backups_consolidated.json", as_json=True)
+            backup_data = get_processed_data_from_database("budget_backups_consolidated")
             if 'backups' not in backup_data:
                 backup_data['backups'] = []
             if 'metadata' not in backup_data:
                 backup_data['metadata'] = {}
         except Exception as e:
-            logger.info(f"Creating new consolidated backup file: {str(e)}")
+            logger.info(f"Creating new backup structure: {str(e)}")
             backup_data = {
                 'backups': [],
                 'metadata': {
                     'created': datetime.now().isoformat(),
-                    'description': 'Consolidated budget backups - all snapshots in one file'
+                    'description': 'Database-stored budget backups'
                 }
             }
         
@@ -458,45 +427,45 @@ def create_consolidated_backup(current_data, change_id, user_name):
         # Add to beginning of list (most recent first)
         backup_data['backups'].insert(0, backup_entry)
         
-        # Keep only the most recent 50 backups to manage file size
+        # Keep only the most recent 50 backups
         max_backups = 50
         if len(backup_data['backups']) > max_backups:
             backup_data['backups'] = backup_data['backups'][:max_backups]
-            logger.info(f"🗂️ Trimmed backup history to most recent {max_backups} entries")
+            logger.info(f"🗂️ Trimmed backup history to {max_backups} entries")
         
         # Update metadata
         backup_data['metadata']['last_updated'] = datetime.now().isoformat()
         backup_data['metadata']['total_backups'] = len(backup_data['backups'])
         backup_data['metadata']['last_backup_by'] = user_name
         
-        # Save consolidated backup file
-        save_to_blob("processed-data", "budget_backups_consolidated.json", backup_data)
+        # Save backup to database
+        save_to_database_as_json("budget_backups_consolidated", backup_data)
         
-        logger.info(f"✅ Added backup snapshot to consolidated file (ID: {change_id})")
+        logger.info(f"✅ Created database backup (ID: {change_id})")
         return True
         
     except Exception as e:
-        logger.error(f"❌ Failed to create consolidated backup: {str(e)}")
+        logger.error(f"❌ Failed to create database backup: {str(e)}")
         return False
 
 @app.route('/api/budget-history', methods=['GET'])
 def get_budget_history():
-    """Get budget change history from consolidated file with filtering options"""
+    """Get budget change history from database"""
     try:
         # Get query parameters
-        entity_key = request.args.get('entity_key')  # Specific department or region
-        entity_type = request.args.get('entity_type')  # 'department' or 'region'
+        entity_key = request.args.get('entity_key')
+        entity_type = request.args.get('entity_type')
         user_name = request.args.get('user_name')
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
         limit = int(request.args.get('limit', 100))
         
-        # Load consolidated audit trail
+        # Load audit trail from database
         try:
-            audit_data = read_from_blob("processed-data", "budget_audit_trail_consolidated.json", as_json=True)
+            audit_data = get_processed_data_from_database("budget_audit_trail_consolidated")
             all_entries = audit_data.get('entries', [])
         except Exception as e:
-            logger.warning(f"No consolidated audit trail found: {str(e)}")
+            logger.warning(f"No audit trail found: {str(e)}")
             return jsonify({'entries': [], 'total': 0, 'filtered': 0})
         
         # Apply filters
@@ -516,8 +485,6 @@ def get_budget_history():
         
         if end_date:
             filtered_entries = [e for e in filtered_entries if e.get('timestamp', '') <= end_date]
-        
-        # Entries are already sorted by timestamp (newest first) in the consolidated file
         
         # Apply limit
         limited_entries = filtered_entries[:limit]
@@ -543,16 +510,16 @@ def get_budget_history():
 
 @app.route('/api/budget-backups', methods=['GET'])
 def get_budget_backups():
-    """Get list of available budget backups from consolidated file"""
+    """Get list of available budget backups from database"""
     try:
         limit = int(request.args.get('limit', 20))
         
         try:
-            backup_data = read_from_blob("processed-data", "budget_backups_consolidated.json", as_json=True)
+            backup_data = get_processed_data_from_database("budget_backups_consolidated")
             backups = backup_data.get('backups', [])
             metadata = backup_data.get('metadata', {})
         except Exception as e:
-            logger.warning(f"No consolidated backup file found: {str(e)}")
+            logger.warning(f"No backup data found: {str(e)}")
             return jsonify({'backups': [], 'metadata': {}, 'total': 0})
         
         # Return limited backup info (without full data snapshots for performance)
@@ -579,9 +546,9 @@ def get_budget_backups():
 
 @app.route('/api/budget-backup/<backup_id>', methods=['GET'])
 def get_specific_backup(backup_id):
-    """Get a specific backup by its ID"""
+    """Get a specific backup by its ID from database"""
     try:
-        backup_data = read_from_blob("processed-data", "budget_backups_consolidated.json", as_json=True)
+        backup_data = get_processed_data_from_database("budget_backups_consolidated")
         backups = backup_data.get('backups', [])
         
         # Find the specific backup
@@ -597,12 +564,12 @@ def get_specific_backup(backup_id):
 
 @app.route('/api/budget-summary/<entity_key>', methods=['GET'])
 def get_budget_summary(entity_key):
-    """Get budget summary for a specific entity with recent changes"""
+    """Get budget summary for a specific entity with recent changes from database"""
     try:
         entity_key = unquote(entity_key)
         
-        # Get current budget
-        budgets = read_from_blob("processed-data", "budget_allocation.json", as_json=True)
+        # Get current budget from database
+        budgets = get_processed_data_from_database("budget_allocation")
         
         current_budget = None
         entity_type = None
@@ -617,14 +584,13 @@ def get_budget_summary(entity_key):
         if not current_budget:
             return jsonify({"status": "error", "message": "Entity not found"}), 404
         
-        # Get recent history for this entity from consolidated file
+        # Get recent history for this entity from database
         try:
-            audit_data = read_from_blob("processed-data", "budget_audit_trail_consolidated.json", as_json=True)
+            audit_data = get_processed_data_from_database("budget_audit_trail_consolidated")
             entity_history = [
                 e for e in audit_data.get('entries', [])
                 if e.get('entity_key') == entity_key
             ]
-            # Entries are already sorted by timestamp (newest first)
             recent_changes = entity_history[:10]  # Last 10 changes
         except:
             recent_changes = []
@@ -642,52 +608,54 @@ def get_budget_summary(entity_key):
         logger.error(f"Error getting budget summary: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-@app.route('/api/test-department/<path:dept_name>', methods=['GET'])
-def test_department(dept_name):
-    """Test route to debug URL encoding"""
-    decoded = unquote(dept_name)
-    return jsonify({
-        "original": dept_name,
-        "decoded": decoded,
-        "test": "Route is working"
-    })
-
-@app.route('/api/debug-budgets', methods=['GET'])
-def debug_budgets():
-    """Debug route to see what budget data exists"""
-    try:
-        budgets = read_from_blob("processed-data", "budget_allocation.json", as_json=True)
-        return jsonify({
-            "departments": list(budgets.get('departments', {}).keys()),
-            "regions": list(budgets.get('regions', {}).keys())[:10],  # First 10 region keys
-            "total_departments": len(budgets.get('departments', {})),
-            "total_regions": len(budgets.get('regions', {}))
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)})
+# Replace your database API's /api/assign-measure endpoint with this corrected version:
 
 @app.route('/api/assign-measure', methods=['POST'])
 def assign_measure():
-    """Manually assign a parked measure to a region/district, or unassign if empty values"""
+    """Manually assign a parked measure to a region/district, or unassign"""
     try:
+        logger.info(f"=== ASSIGN MEASURE DEBUG ===")
+        logger.info(f"Content-Type: {request.content_type}")
+        logger.info(f"Raw data: {request.data}")
+        logger.info(f"Raw data type: {type(request.data)}")
+        
         assignment = request.get_json()
         
+        logger.info(f"Parsed assignment: {assignment}")
+        logger.info(f"Assignment type: {type(assignment)}")
+        logger.info(f"=== END DEBUG ===")
+
+        # Validate data structure
+        if not isinstance(assignment, dict):
+            logger.error(f"❌ Invalid data type received: {type(assignment)}")
+            return jsonify({
+                "status": "error", 
+                "message": f"Expected dict, got {type(assignment)}",
+                "received_data": str(assignment)
+            }), 400
+
         # Check if this is an unassign operation
         is_unassign = (assignment.get('region') == '' and assignment.get('district') == '') or assignment.get('unassign', False)
         
         # Validate required fields
         if not is_unassign:
             required_fields = ['bestellnummer', 'region', 'district']
-            for field in required_fields:
-                if field not in assignment or not assignment[field]:
-                    return jsonify({"status": "error", "message": f"Missing required field: {field}"}), 400
+            missing_fields = [field for field in required_fields if field not in assignment or not assignment[field]]
+            if missing_fields:
+                return jsonify({
+                    "status": "error", 
+                    "message": f"Missing required fields: {', '.join(missing_fields)}"
+                }), 400
         else:
             # For unassign, only bestellnummer is required
             if 'bestellnummer' not in assignment:
-                return jsonify({"status": "error", "message": "Missing required field: bestellnummer"}), 400
+                return jsonify({
+                    "status": "error", 
+                    "message": "Missing required field: bestellnummer"
+                }), 400
         
-        # Get the current transactions
-        transactions = read_from_blob("processed-data", "transactions.json", as_json=True)
+        # Get the current transactions from database
+        transactions = get_processed_data_from_database("transactions")
         
         # Find the measure to update
         measure_found = False
@@ -721,7 +689,7 @@ def assign_measure():
             action_message = f"Measure {assignment['bestellnummer']} moved back to awaiting assignment"
             
         else:
-            # Normal assign logic
+            # ✅ FIXED: Normal assign logic - EXACTLY like blob storage
             for measure in transactions['parked_measures']:
                 if measure['bestellnummer'] == assignment['bestellnummer']:
                     measure_found = True
@@ -733,27 +701,37 @@ def assign_measure():
                     measure['district'] = assignment['district']
                     measure['status'] = 'Manually assigned, awaiting SAP'
                     
-                    # Also update in the transactions list
+                    # ✅ CRITICAL: Update category in parked_measures
+                    if measure.get('category') == 'UNASSIGNED_MEASURE':
+                        measure['category'] = 'PARKED_MEASURE'
+                    
+                    # ✅ CRITICAL: Also update in the transactions list - EXACTLY like blob storage
                     for tx in transactions['transactions']:
                         if tx.get('bestellnummer') == assignment['bestellnummer']:
                             tx['manual_assignment'] = measure['manual_assignment']
                             tx['region'] = assignment['region']
                             tx['district'] = assignment['district']
                             tx['status'] = 'Manually assigned, awaiting SAP'
+                            
+                            # ✅ CRITICAL: This was missing in database version!
                             if tx.get('category') == 'UNASSIGNED_MEASURE':
                                 tx['category'] = 'PARKED_MEASURE'
+                            break
                     break
                     
             action_message = f"Measure {assignment['bestellnummer']} assigned to {assignment['region']}/{assignment['district']}"
         
         if not measure_found:
-            return jsonify({"status": "error", "message": f"Measure with bestellnummer {assignment['bestellnummer']} not found"}), 404
+            return jsonify({
+                "status": "error", 
+                "message": f"Measure with bestellnummer {assignment['bestellnummer']} not found"
+            }), 404
         
-        # Save updated transactions
-        save_to_blob("processed-data", "transactions.json", transactions)
+        # Save updated transactions to database
+        save_to_database_as_json("transactions", transactions)
         
-        # Update frontend views
-        generate_frontend_views(transactions)
+        # Update frontend views in database
+        generate_frontend_views_to_database(transactions)
         
         return jsonify({
             "status": "success", 
@@ -762,6 +740,9 @@ def assign_measure():
         
     except Exception as e:
         logger.error(f"Error in assign/unassign measure: {str(e)}")
+        logger.error(f"Exception type: {type(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/bulk-assign-measures', methods=['POST'])
@@ -773,8 +754,8 @@ def bulk_assign_measures():
         if not isinstance(assignments, list):
             return jsonify({"status": "error", "message": "Expected a list of assignments"}), 400
         
-        # Get the current transactions
-        transactions = read_from_blob("processed-data", "transactions.json", as_json=True)
+        # Get the current transactions from database
+        transactions = get_processed_data_from_database("transactions")
         
         # Track which measures were successfully assigned
         successful_assignments = []
@@ -821,11 +802,11 @@ def bulk_assign_measures():
                     "reason": "Measure not found"
                 })
         
-        # Save updated transactions
-        save_to_blob("processed-data", "transactions.json", transactions)
+        # Save updated transactions to database
+        save_to_database_as_json("transactions", transactions)
         
-        # Update frontend views
-        generate_frontend_views(transactions)
+        # Update frontend views in database
+        generate_frontend_views_to_database(transactions)
         
         return jsonify({
             "status": "success", 
@@ -839,157 +820,303 @@ def bulk_assign_measures():
 
 @app.route('/api/process', methods=['POST'])
 def trigger_processing():
-    """Manually trigger the MSP-SAP data processing"""
+    """Manually trigger the MSP-SAP data processing using database"""
     try:
-        # Import the main function from the processing script
-        from msp_sap_integration_fixed import main as process_data
+        # Set database password if needed
+        if not os.getenv("DB_PASSWORD"):
+            return jsonify({
+                "status": "error", 
+                "message": "Database password not configured. Please set DB_PASSWORD environment variable."
+            }), 500
         
-        # Run the data processing
-        process_data()
+        # Run the database-integrated data processing
+        process_data_main()
         
         return jsonify({
             "status": "success",
-            "message": "Data processing completed successfully",
+            "message": "Database-integrated data processing completed successfully",
             "timestamp": datetime.now().isoformat()
         })
     except Exception as e:
         logger.error(f"Error in data processing: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-@app.route('/api/upload-file', methods=['POST'])
-def upload_file():
-    """Upload a file to the mock-data container"""
+@app.route('/api/database-status', methods=['GET'])
+def database_status():
+    """Check database connection status"""
     try:
-        if 'file' not in request.files:
-            return jsonify({"status": "error", "message": "No file part"}), 400
-            
-        file = request.files['file']
-        if file.filename == '':
-            return jsonify({"status": "error", "message": "No selected file"}), 400
-        
-        # Get the file type from request
-        file_type = request.form.get('type', 'unknown')
-        
-        # Determine the filename based on type
-        if file_type == 'sap':
-            filename = "SAPData.xlsx"
-        elif file_type == 'msp':
-            filename = "MSPData.xlsx"
-        elif file_type == 'mapping':
-            filename = "MappingU.xlsx"
-        else:
-            # Use the original filename
-            filename = file.filename
-        
-        # Save the file to Azure Blob Storage
-        blob_client = mock_data_container_client.get_blob_client(filename)
-        blob_client.upload_blob(file.read(), overwrite=True)
+        db_mgr = get_db_manager()
+        connection_ok = db_mgr.test_connection()
         
         return jsonify({
-            "status": "success",
-            "message": f"File uploaded successfully as {filename}",
-            "filename": filename
+            "database_connected": connection_ok,
+            "server": "msp-sap-database-sadu.database.windows.net",
+            "database": "Marketing",
+            "status": "connected" if connection_ok else "disconnected",
+            "timestamp": datetime.now().isoformat()
         })
-        
     except Exception as e:
-        logger.error(f"Error uploading file: {str(e)}")
+        logger.error(f"Error checking database status: {str(e)}")
+        return jsonify({
+            "database_connected": False,
+            "status": "error",
+            "message": str(e),
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/available-results', methods=['GET'])
+def get_available_results():
+    """Get list of all available results in the database"""
+    try:
+        from msp_sap_integration_database import get_all_available_results
+        results = get_all_available_results()
+        
+        return jsonify({
+            "available_results": results,
+            "total": len(results),
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error getting available results: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-@app.route('/api/download-file/<container>/<filename>', methods=['GET'])
-def download_file(container, filename):
-    """Download a file from Azure Blob Storage"""
+@app.route('/api/batch-info', methods=['GET'])
+def get_batch_info():
+    """Get information about the latest batches in each table"""
     try:
-        # Select the appropriate container
-        if container == 'mock-data':
-            container_client = mock_data_container_client
-        elif container == 'processed-data':
-            container_client = processed_data_container_client
-        else:
-            return jsonify({"status": "error", "message": f"Invalid container: {container}"}), 400
+        db_mgr = get_db_manager()
         
-        # Get the blob client and download the file
-        blob_client = container_client.get_blob_client(filename)
-        download_stream = blob_client.download_blob()
+        batch_info = {}
+        
+        # Get latest batch IDs for each table
+        tables = {
+            'sap_transactions': 'BULK_IMPORT_%',
+            'msp_measures': 'MSP_%',
+            'kostenstelle_mapping_floor': 'BULK_IMPORT_%',
+            'kostenstelle_mapping_hq': 'HQ_FIX_%'
+        }
+        
+        for table_name, pattern in tables.items():
+            try:
+                latest_batch = db_mgr.get_latest_batch_id(table_name, pattern)
+                batch_info[table_name] = {
+                    "latest_batch": latest_batch,
+                    "pattern": pattern
+                }
+            except Exception as e:
+                batch_info[table_name] = {
+                    "latest_batch": None,
+                    "error": str(e),
+                    "pattern": pattern
+                }
+        
+        return jsonify({
+            "batch_info": batch_info,
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error getting batch info: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/export-data/<result_type>', methods=['GET'])
+def export_data(result_type):
+    """Export processed data as JSON file for download"""
+    try:
+        # Get data from database
+        data = get_processed_data_from_database(result_type)
+        
+        if not data:
+            return jsonify({"status": "error", "message": f"No data found for {result_type}"}), 404
         
         # Create a temporary file
-        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-            temp_file.write(download_stream.readall())
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as temp_file:
+            json.dump(data, temp_file, cls=JSONEncoder, indent=2)
             temp_path = temp_file.name
         
-        # Determine MIME type based on file extension
-        if filename.endswith('.json'):
-            mime_type = 'application/json'
-        elif filename.endswith('.xlsx'):
-            mime_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        elif filename.endswith('.csv'):
-            mime_type = 'text/csv'
-        else:
-            mime_type = 'application/octet-stream'
+        # Generate filename
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"{result_type}_{timestamp}.json"
         
         # Send the file
         return send_file(
             temp_path,
-            mimetype=mime_type,
+            mimetype='application/json',
             as_attachment=True,
             download_name=filename
         )
         
     except Exception as e:
-        logger.error(f"Error downloading file: {str(e)}")
+        logger.error(f"Error exporting data: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint for database version"""
+    try:
+        # Test database connection
+        db_mgr = get_db_manager()
+        db_connected = db_mgr.test_connection()
+        
+        # Get database password status
+        db_password_set = bool(os.getenv("DB_PASSWORD"))
+        
+        # Try to get some data
+        try:
+            transactions = get_processed_data_from_database("transactions")
+            data_available = bool(transactions)
+            last_processing = transactions.get('processing_date', 'Unknown')
+        except:
+            data_available = False
+            last_processing = 'No data'
+        
+        status = "healthy" if (db_connected and db_password_set and data_available) else "unhealthy"
+        
+        return jsonify({
+            "status": status,
+            "version": "2.0.0 (Database)",
+            "database": {
+                "connected": db_connected,
+                "password_configured": db_password_set,
+                "server": "msp-sap-database-sadu.database.windows.net",
+                "database": "Marketing"
+            },
+            "data": {
+                "available": data_available,
+                "last_processing": last_processing
+            },
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Health check error: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
+# Legacy endpoints for backward compatibility (these will return info about the migration)
+@app.route('/api/upload-file', methods=['POST'])
+def upload_file():
+    """Legacy endpoint - now data comes from database"""
+    return jsonify({
+        "status": "info",
+        "message": "File upload no longer needed. System now reads data directly from Azure SQL Database.",
+        "migration_info": {
+            "old_method": "Excel files via blob storage",
+            "new_method": "Direct database integration",
+            "data_source": "Azure SQL Database tables"
+        }
+    }), 200
+
+@app.route('/api/download-file/<container>/<filename>', methods=['GET'])
+def download_file(container, filename):
+    """Legacy endpoint - data now in database"""
+    return jsonify({
+        "status": "info",
+        "message": "File downloads replaced with database queries.",
+        "suggestion": f"Use /api/export-data/{filename.replace('.json', '')} instead",
+        "available_exports": ["transactions", "budget_allocation", "frontend_departments", "frontend_regions"]
+    }), 200
 
 @app.route('/api/list-files/<container>', methods=['GET'])
 def list_files(container):
-    """List files in an Azure Blob Storage container"""
+    """Legacy endpoint - now shows available database results"""
     try:
-        # Select the appropriate container
-        if container == 'mock-data':
-            container_client = mock_data_container_client
-        elif container == 'processed-data':
-            container_client = processed_data_container_client
-        else:
-            return jsonify({"status": "error", "message": f"Invalid container: {container}"}), 400
-        
-        # List blobs in the container
-        blobs = []
-        for blob in container_client.list_blobs():
-            blobs.append({
-                "name": blob.name,
-                "size": blob.size,
-                "last_modified": blob.last_modified.isoformat() if blob.last_modified else None
-            })
+        from msp_sap_integration_database import get_all_available_results
+        results = get_all_available_results()
         
         return jsonify({
-            "container": container,
-            "files": blobs
+            "status": "migrated",
+            "message": f"Container '{container}' replaced with database storage",
+            "available_results": results,
+            "note": "Use /api/available-results for current data"
         })
-        
     except Exception as e:
-        logger.error(f"Error listing files: {str(e)}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return jsonify({
+            "status": "info",
+            "message": "System migrated to database storage",
+            "container": container,
+            "error": str(e)
+        })
 
-# Additional endpoint to clean up old files if needed
 @app.route('/api/cleanup-storage', methods=['POST'])
 def cleanup_storage():
-    """Optional endpoint to manually clean up very old files if storage becomes an issue"""
+    """Database maintenance endpoint"""
     try:
-        cleanup_data = request.get_json()
-        days_to_keep = cleanup_data.get('days_to_keep', 90)  # Default keep 90 days
+        cleanup_data = request.get_json() or {}
+        days_to_keep = cleanup_data.get('days_to_keep', 90)
         
-        # This is an optional maintenance endpoint
-        # You could implement logic here to remove very old archived entries
-        # if your storage becomes too full
+        # For database version, this could clean old audit entries or backups
+        # Implementation would depend on specific requirements
         
         return jsonify({
             "status": "success",
-            "message": f"Cleanup completed (keeping last {days_to_keep} days)",
-            "note": "Currently using consolidated files - cleanup not needed"
+            "message": f"Database maintenance completed (keeping last {days_to_keep} days)",
+            "storage_type": "Azure SQL Database",
+            "note": "Database automatically manages storage optimization"
         })
         
     except Exception as e:
-        logger.error(f"Error in cleanup: {str(e)}")
+        logger.error(f"Error in database maintenance: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+# Debug endpoints for database version
+@app.route('/api/debug-budgets', methods=['GET'])
+def debug_budgets():
+    """Debug route to see what budget data exists in database"""
+    try:
+        budgets = get_processed_data_from_database("budget_allocation")
+        return jsonify({
+            "departments": list(budgets.get('departments', {}).keys())[:10],  # First 10
+            "regions": list(budgets.get('regions', {}).keys())[:10],  # First 10
+            "total_departments": len(budgets.get('departments', {})),
+            "total_regions": len(budgets.get('regions', {})),
+            "last_updated": budgets.get('last_updated'),
+            "storage": "Azure SQL Database"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e), "storage": "Azure SQL Database"})
+
+@app.route('/api/test-department/<path:dept_name>', methods=['GET'])
+def test_department(dept_name):
+    """Test route to debug URL encoding"""
+    decoded = unquote(dept_name)
+    return jsonify({
+        "original": dept_name,
+        "decoded": decoded,
+        "test": "Database API route is working",
+        "version": "2.0.0"
+    })
+
+@app.route('/api/debug-request', methods=['POST'])
+def debug_request():
+    """Debug endpoint to see exactly what data is being received"""
+    try:
+        return jsonify({
+            "content_type": request.content_type,
+            "raw_data": str(request.data),
+            "raw_data_type": str(type(request.data)),
+            "get_json_result": request.get_json(),
+            "get_json_type": str(type(request.get_json())),
+            "headers": dict(request.headers),
+            "method": request.method,
+            "debug_info": "This endpoint helps debug the data structure issue"
+        })
+    except Exception as e:
+        return jsonify({
+            "error": str(e),
+            "error_type": str(type(e)),
+            "raw_data": str(request.data),
+            "content_type": request.content_type,
+            "debug_info": "Error occurred during debugging"
+        })
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    # Check if database password is set before starting
+    if not os.getenv("DB_PASSWORD"):
+        print("❌ WARNING: DB_PASSWORD environment variable not set!")
+        print("The API will start but database operations will fail.")
+        print("Please set DB_PASSWORD before using database features.")
+    
+    # Start the Flask app on a different port for testing
+    app.run(host='0.0.0.0', port=5001, debug=True)  # ← Changed to port 5001
