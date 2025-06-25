@@ -193,6 +193,189 @@ def get_data():
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"status": "error", "message": str(e)}), 500
+    
+# Add this debug endpoint to your Flask app to see what's in your database
+
+@app.route('/api/debug-data', methods=['GET'])
+def debug_data():
+    """Debug endpoint to see what's actually in the database"""
+    try:
+        logger.info("🔍 DEBUG: Starting debug data check...")
+        
+        # Check what's actually in the database for each table
+        debug_info = {}
+        
+        # Check frontend_departments
+        try:
+            departments_data = get_processed_data_from_database("frontend_departments")
+            debug_info['frontend_departments'] = {
+                'exists': departments_data is not None,
+                'type': type(departments_data).__name__,
+                'content': departments_data if departments_data else 'NULL',
+                'keys': list(departments_data.keys()) if isinstance(departments_data, dict) else 'N/A'
+            }
+            logger.info(f"🔍 DEBUG: frontend_departments: {debug_info['frontend_departments']}")
+        except Exception as e:
+            debug_info['frontend_departments'] = {'error': str(e)}
+        
+        # Check frontend_regions  
+        try:
+            regions_data = get_processed_data_from_database("frontend_regions")
+            debug_info['frontend_regions'] = {
+                'exists': regions_data is not None,
+                'type': type(regions_data).__name__,
+                'content': regions_data if regions_data else 'NULL', 
+                'keys': list(regions_data.keys()) if isinstance(regions_data, dict) else 'N/A'
+            }
+            logger.info(f"🔍 DEBUG: frontend_regions: {debug_info['frontend_regions']}")
+        except Exception as e:
+            debug_info['frontend_regions'] = {'error': str(e)}
+        
+        # Check transactions
+        try:
+            transactions_data = get_processed_data_from_database("transactions")
+            debug_info['transactions'] = {
+                'exists': transactions_data is not None,
+                'type': type(transactions_data).__name__,
+                'has_transactions': 'transactions' in transactions_data if isinstance(transactions_data, dict) else False,
+                'keys': list(transactions_data.keys()) if isinstance(transactions_data, dict) else 'N/A'
+            }
+            logger.info(f"🔍 DEBUG: transactions: {debug_info['transactions']}")
+        except Exception as e:
+            debug_info['transactions'] = {'error': str(e)}
+        
+        # Check budget allocation
+        try:
+            budget_data = get_processed_data_from_database("budget_allocation")
+            debug_info['budget_allocation'] = {
+                'exists': budget_data is not None,
+                'type': type(budget_data).__name__,
+                'departments_count': len(budget_data.get('departments', {})) if isinstance(budget_data, dict) else 'N/A',
+                'regions_count': len(budget_data.get('regions', {})) if isinstance(budget_data, dict) else 'N/A',
+                'keys': list(budget_data.keys()) if isinstance(budget_data, dict) else 'N/A'
+            }
+            logger.info(f"🔍 DEBUG: budget_allocation: {debug_info['budget_allocation']}")
+        except Exception as e:
+            debug_info['budget_allocation'] = {'error': str(e)}
+        
+        # Try to see all available results
+        try:
+            from msp_sap_integration_fixed import get_all_available_results
+            available_results = get_all_available_results()
+            debug_info['available_results'] = available_results
+            logger.info(f"🔍 DEBUG: available_results: {available_results}")
+        except Exception as e:
+            debug_info['available_results'] = {'error': str(e)}
+        
+        return jsonify({
+            'debug_info': debug_info,
+            'timestamp': datetime.now().isoformat(),
+            'status': 'debug_complete'
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Debug endpoint error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Also add this enhanced version of your get_data endpoint
+@app.route('/api/data-enhanced', methods=['GET'])
+def get_data_enhanced():
+    """Enhanced version of get_data with better debugging"""
+    try:
+        logger.info("🔍 Enhanced /api/data request...")
+        
+        # Check if we have ANY data that could be used to build departments/regions
+        debug_info = {}
+        
+        # 1. Try to get from frontend tables first
+        try:
+            departments_data = get_processed_data_from_database("frontend_departments")
+            departments = safe_parse_json(departments_data, 'departments')
+            debug_info['frontend_departments'] = {
+                'raw_data': departments_data,
+                'parsed_count': len(departments) if isinstance(departments, list) else 0
+            }
+        except Exception as e:
+            departments = []
+            debug_info['frontend_departments'] = {'error': str(e)}
+        
+        try:
+            regions_data = get_processed_data_from_database("frontend_regions")
+            regions = safe_parse_json(regions_data, 'regions')
+            debug_info['frontend_regions'] = {
+                'raw_data': regions_data,
+                'parsed_count': len(regions) if isinstance(regions, list) else 0
+            }
+        except Exception as e:
+            regions = []
+            debug_info['frontend_regions'] = {'error': str(e)}
+        
+        # 2. If that didn't work, try to build from budget data
+        if not departments and not regions:
+            logger.info("🔧 Frontend tables empty, trying to build from budget data...")
+            try:
+                budget_data = get_processed_data_from_database("budget_allocation")
+                if budget_data and 'departments' in budget_data:
+                    # Build departments from budget allocation keys
+                    dept_names = set()
+                    for dept_key in budget_data['departments'].keys():
+                        # Extract department name from "Department Name|Location Type" format
+                        dept_name = dept_key.split('|')[0]
+                        dept_names.add(dept_name)
+                    
+                    departments = [
+                        {
+                            'name': dept_name,
+                            'location_type': 'Unknown',  # We'd need to infer this
+                            'total_amount': 0,
+                            'booked_amount': 0,
+                            'reserved_amount': 0
+                        }
+                        for dept_name in dept_names
+                    ]
+                    debug_info['built_from_budget'] = f"Built {len(departments)} departments from budget keys"
+                    
+            except Exception as e:
+                debug_info['budget_fallback'] = {'error': str(e)}
+        
+        # 3. Get other data
+        try:
+            transactions = get_processed_data_from_database("transactions")
+            debug_info['transactions'] = {'exists': transactions is not None}
+        except Exception as e:
+            transactions = {"error": str(e)}
+            debug_info['transactions'] = {'error': str(e)}
+        
+        try:
+            awaiting = get_processed_data_from_database("frontend_awaiting_assignment")
+            debug_info['awaiting'] = {'exists': awaiting is not None}
+        except Exception as e:
+            awaiting = {}
+            debug_info['awaiting'] = {'error': str(e)}
+        
+        try:
+            budgets = get_processed_data_from_database("budget_allocation")
+            debug_info['budgets'] = {'exists': budgets is not None}
+        except Exception as e:
+            budgets = {}
+            debug_info['budgets'] = {'error': str(e)}
+        
+        response_data = {
+            "departments": departments,
+            "regions": regions,  
+            "awaiting_assignment": awaiting,
+            "budget_allocation": budgets,
+            "transaction_stats": transactions.get('statistics', {}) if isinstance(transactions, dict) else {},
+            "_debug_info": debug_info  # Include debug info in response
+        }
+        
+        logger.info(f"🎯 Enhanced response: {len(departments)} departments, {len(regions)} regions")
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        logger.error(f"❌ Enhanced get_data error: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/budget-allocation', methods=['GET', 'POST'])
 def budget_allocation():
