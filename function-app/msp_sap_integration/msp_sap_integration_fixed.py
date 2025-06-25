@@ -4,22 +4,16 @@ import re
 import json
 import os
 from datetime import datetime
-from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
 import logging
 import concurrent.futures
 import functools
 from typing import Dict, List, Any, Optional, Tuple, Set
 import time
-import io
+import pyodbc
+from sqlalchemy import create_engine, text
+from urllib.parse import quote_plus
 
-# [Your existing imports]
-import pandas as pd
-import numpy as np
-import re
-import json
-# etc...
-
-# Add these helper functions after all imports
+# [Your existing helper functions - keeping them unchanged]
 def safe_float_conversion(value):
     """
     Safely convert a value to float, handling various number formats:
@@ -30,14 +24,14 @@ def safe_float_conversion(value):
     if pd.isna(value):
         return 0.0
         
-    # Convert to string firsttt
+    # Convert to string first
     str_value = str(value).strip()
     
     # Return 0 for empty strings
     if not str_value:
         return 0.0
     
-    # Remove currency symbols and other non-numeric charactersss
+    # Remove currency symbols and other non-numeric characters
     # Keep only digits, comma, dot, minus sign
     cleaned = ""
     for char in str_value:
@@ -88,34 +82,105 @@ def safe_get(row, column, default=None):
         return default
     return row[column]
 
-# 1. Enhance the make_json_serializable function to better handle NaN values
-def make_json_serializable(obj):
+# Enhanced make_json_serializable function to better handle NaN values and circular references
+def make_json_serializable(obj, _seen=None):
     """
     Convert objects that are not JSON serializable to serializable formats
+    Added circular reference detection
     """
-    if isinstance(obj, pd.Timestamp):
-        return obj.strftime('%Y-%m-%d %H:%M:%S')
-    elif isinstance(obj, pd.Series):
-        # Convert NaN values to None in Series
-        return {k: None if pd.isna(v) else make_json_serializable(v) for k, v in obj.to_dict().items()}
-    elif isinstance(obj, pd.DataFrame):
-        # Handle NaN values in DataFrame
-        records = obj.to_dict(orient='records')
-        return [{k: None if pd.isna(v) else make_json_serializable(v) for k, v in record.items()} for record in records]
-    elif isinstance(obj, np.integer):
-        return int(obj)
-    elif isinstance(obj, np.floating):
-        return float(obj)
-    elif isinstance(obj, np.ndarray):
-        return [None if pd.isna(x) else make_json_serializable(x) for x in obj.tolist()]
-    elif pd.isna(obj):
-        return None
-    else:
-        return obj
+    if _seen is None:
+        _seen = set()
+    
+    # Check for circular references
+    obj_id = id(obj)
+    if obj_id in _seen:
+        return f"<Circular Reference: {type(obj).__name__}>"
+    
+    if isinstance(obj, (dict, list, pd.Series, pd.DataFrame)):
+        _seen.add(obj_id)
+    
+    try:
+        if isinstance(obj, pd.Timestamp):
+            return obj.strftime('%Y-%m-%d %H:%M:%S')
+        elif isinstance(obj, pd.Series):
+            # Convert Series to simple dict, avoiding circular references
+            result = {}
+            for k, v in obj.items():
+                try:
+                    if pd.isna(v):
+                        result[str(k)] = None
+                    else:
+                        result[str(k)] = make_json_serializable(v, _seen.copy())
+                except:
+                    result[str(k)] = str(v) if v is not None else None
+            return result
+        elif isinstance(obj, pd.DataFrame):
+            # Convert DataFrame to simple list of dicts
+            try:
+                records = obj.to_dict(orient='records')
+                result = []
+                for record in records:
+                    clean_record = {}
+                    for k, v in record.items():
+                        try:
+                            if pd.isna(v):
+                                clean_record[str(k)] = None
+                            else:
+                                clean_record[str(k)] = make_json_serializable(v, _seen.copy())
+                        except:
+                            clean_record[str(k)] = str(v) if v is not None else None
+                    result.append(clean_record)
+                return result
+            except:
+                return f"<DataFrame with {len(obj)} rows>"
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            if np.isnan(obj):
+                return None
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            try:
+                return [make_json_serializable(x, _seen.copy()) for x in obj.tolist()]
+            except:
+                return f"<Array with {len(obj)} items>"
+        elif isinstance(obj, dict):
+            result = {}
+            for k, v in obj.items():
+                try:
+                    if pd.isna(v):
+                        result[str(k)] = None
+                    else:
+                        result[str(k)] = make_json_serializable(v, _seen.copy())
+                except:
+                    result[str(k)] = str(v) if v is not None else None
+            return result
+        elif isinstance(obj, (list, tuple)):
+            try:
+                return [make_json_serializable(item, _seen.copy()) for item in obj]
+            except:
+                return f"<List with {len(obj)} items>"
+        elif pd.isna(obj):
+            return None
+        elif hasattr(obj, '__dict__'):
+            # For custom objects, convert to simple dict
+            try:
+                return {k: make_json_serializable(v, _seen.copy()) for k, v in obj.__dict__.items() 
+                       if not k.startswith('_')}
+            except:
+                return str(obj)
+        else:
+            return obj
+    except Exception as e:
+        # If all else fails, convert to string
+        return str(obj) if obj is not None else None
+    finally:
+        if obj_id in _seen:
+            _seen.discard(obj_id)
 
 class JSONEncoder(json.JSONEncoder):
     """
-    Custom JSON encoder that handles pandas and numpy types
+    Custom JSON encoder that handles pandas and numpy types with circular reference protection
     """
     def default(self, obj):
         # Handle NaN, infinity, and -infinity
@@ -126,24 +191,178 @@ class JSONEncoder(json.JSONEncoder):
                 return "Infinity"
             elif np.isinf(obj) and obj < 0:
                 return "-Infinity"
-        return make_json_serializable(obj)
+        
+        try:
+            return make_json_serializable(obj)
+        except Exception as e:
+            # Ultimate fallback
+            return str(obj) if obj is not None else None
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("msp_sap_integration")
 
-# Azure Storage credentials
-MOCK_DATA_SAS_URL = "https://financedatastore.blob.core.windows.net/mock-data?sp=racwdli&st=2025-05-05T14:24:17Z&se=2026-12-30T23:24:17Z&spr=https&sv=2024-11-04&sr=c&sig=4qw%2BrpMKNCvKzNAN0%2FIaeS%2BU0Qenb1YhJDhpJDaVMC0%3D"
-PROCESSED_DATA_SAS_URL = "https://financedatastore.blob.core.windows.net/processed-data?sp=racwdli&st=2025-05-05T14:27:31Z&se=2026-08-30T22:27:31Z&spr=https&sv=2024-11-04&sr=c&sig=3OHdNWWQ%2FRuGyxebi8746XC1%2F1Cc3uzld9wjrdFIfL0%3D"
+# -----------------------------------------------------------------------------
+# DATABASE CONNECTION AND CONFIGURATION
+# -----------------------------------------------------------------------------
 
-# Create BlobServiceClient objects for each container
-mock_data_container_client = ContainerClient.from_container_url(MOCK_DATA_SAS_URL)
-processed_data_container_client = ContainerClient.from_container_url(PROCESSED_DATA_SAS_URL)
+# Database connection parameters
+DB_SERVER = "msp-sap-database-sadu.database.windows.net"
+DB_NAME = "Marketing"
+DB_USER = "msp_admin"
+DB_PASSWORD = os.getenv("DB_PASSWORD")  # Set this environment variable
 
 # Constants
 BATCH_SIZE = 1000  # Number of records to process in a batch
 MAX_WORKERS = 8    # Maximum number of parallel workers
 CACHE_EXPIRY = 3600  # Cache expiry in seconds
+
+class DatabaseManager:
+    """
+    Manages database connections and operations
+    """
+    
+    def __init__(self):
+        self.connection_string = None
+        self.engine = None
+        self._setup_connection()
+    
+    def _setup_connection(self):
+        """Setup database connection string and SQLAlchemy engine"""
+        try:
+            # Validate that password is set
+            if not DB_PASSWORD:
+                raise ValueError("DB_PASSWORD environment variable is not set or is empty")
+            
+            # Build connection string for pyodbc
+            self.connection_string = (
+                f"DRIVER={{ODBC Driver 18 for SQL Server}};"
+                f"SERVER={DB_SERVER};"
+                f"DATABASE={DB_NAME};"
+                f"UID={DB_USER};"
+                f"PWD={DB_PASSWORD};"
+                f"Encrypt=yes;"
+                f"TrustServerCertificate=no;"
+                f"Connection Timeout=30;"
+            )
+            
+            # Build SQLAlchemy connection string
+            # Ensure password is a string before URL encoding
+            quoted_password = quote_plus(str(DB_PASSWORD))
+            sqlalchemy_url = (
+                f"mssql+pyodbc://{DB_USER}:{quoted_password}@{DB_SERVER}/{DB_NAME}"
+                f"?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=no"
+            )
+            
+            self.engine = create_engine(sqlalchemy_url, fast_executemany=True)
+            logger.info("✅ Database connection configured successfully")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to setup database connection: {str(e)}")
+            raise
+    
+    def test_connection(self):
+        """Test the database connection"""
+        try:
+            with self.engine.connect() as conn:
+                result = conn.execute(text("SELECT 1 as test")).fetchone()
+                logger.info("✅ Database connection test successful")
+                return True
+        except Exception as e:
+            logger.error(f"❌ Database connection test failed: {str(e)}")
+            return False
+    
+    def get_latest_batch_id(self, table_name: str, batch_pattern: str) -> str:
+        """Get the most recent batch_id for a table"""
+        try:
+            query = text(f"""
+                SELECT TOP 1 batch_id 
+                FROM {table_name} 
+                WHERE batch_id LIKE :pattern 
+                ORDER BY upload_date DESC, batch_id DESC
+            """)
+            
+            with self.engine.connect() as conn:
+                result = conn.execute(query, {"pattern": batch_pattern}).fetchone()
+                if result:
+                    logger.info(f"Latest batch for {table_name}: {result[0]}")
+                    return result[0]
+                else:
+                    logger.warning(f"No batches found for {table_name} with pattern {batch_pattern}")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"Error getting latest batch for {table_name}: {str(e)}")
+            raise
+    
+    def read_table_as_dataframe(self, table_name: str, batch_id: str = None, column_mapping: dict = None) -> pd.DataFrame:
+        """
+        Read table data as pandas DataFrame with optional batch filtering and column mapping
+        """
+        try:
+            # Build the query
+            if batch_id:
+                query = f"SELECT * FROM {table_name} WHERE batch_id = '{batch_id}'"
+            else:
+                query = f"SELECT * FROM {table_name}"
+            
+            # Read data using pandas
+            df = pd.read_sql_query(query, self.engine)
+            
+            # CRITICAL: Create a completely independent copy to break any database references
+            df = df.copy(deep=True)
+            
+            # Apply column mapping if provided (to maintain compatibility with existing code)
+            if column_mapping:
+                df = df.rename(columns=column_mapping)
+            
+            # CRITICAL: Reset index and ensure clean DataFrame
+            df = df.reset_index(drop=True)
+            
+            logger.info(f"Read {len(df)} records from {table_name}")
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error reading {table_name}: {str(e)}")
+            raise
+
+# Initialize database manager
+db_manager = DatabaseManager()
+
+# -----------------------------------------------------------------------------
+# COLUMN MAPPING FOR COMPATIBILITY
+# -----------------------------------------------------------------------------
+
+# Define column mappings to maintain compatibility with existing code
+SAP_COLUMN_MAPPING = {
+    'belegnummer': 'Belegnummer',
+    'kostenstelle': 'Kostenstelle', 
+    'betrag_in_hauswaehrung': 'Betrag in Hauswährung',
+    'text_field': 'Text',
+    'buchungsdatum': 'Buchungsdatum'
+}
+
+MSP_COLUMN_MAPPING = {
+    'bestellnummer': 'Bestellnummer',
+    'titel_der_massnahme': 'Titel der Maßnahme',
+    'benoetiges_budget': 'Benötigtes Budget (Geschätzt)',
+    'gruppen': 'Gruppen',
+    'datum': 'Datum',
+    'name_field': 'Name'
+}
+
+FLOOR_MAPPING_COLUMNS = {
+    'department': 'Department',
+    'region': 'Region', 
+    'district': 'District',
+    'kostenstelle': 'Kostenstelle'
+}
+
+HQ_MAPPING_COLUMNS = {
+    'bezeichnung': 'Bezeichnung',
+    'abteilung': 'Abteilung',
+    'kostenstelle': 'Kostenstelle '  # Note the trailing space for compatibility
+}
 
 # -----------------------------------------------------------------------------
 # Simple data models without dataclasses to avoid inheritance issues
@@ -206,23 +425,187 @@ bestellnummer_cache = Cache(CACHE_EXPIRY)
 department_cache = Cache(CACHE_EXPIRY)
 
 # -----------------------------------------------------------------------------
-# Main function
+# DATABASE DATA LOADING FUNCTIONS (REPLACEMENT FOR BLOB OPERATIONS)
+# -----------------------------------------------------------------------------
+
+def read_from_database(table_type: str) -> pd.DataFrame:
+    """
+    Read data from database tables based on table type
+    This replaces the read_from_blob function
+    """
+    logger.info(f"Reading {table_type} data from database...")
+    
+    if table_type == "sap":
+        # Get latest SAP batch
+        latest_batch = db_manager.get_latest_batch_id("sap_transactions", "BULK_IMPORT_%")
+        if not latest_batch:
+            raise ValueError("No SAP data found in database")
+        
+        # Read SAP data with column mapping
+        df = db_manager.read_table_as_dataframe(
+            "sap_transactions", 
+            latest_batch, 
+            SAP_COLUMN_MAPPING
+        )
+        
+    elif table_type == "msp":
+        # Get latest MSP batch  
+        latest_batch = db_manager.get_latest_batch_id("msp_measures", "MSP_%")
+        if not latest_batch:
+            raise ValueError("No MSP data found in database")
+        
+        # Read MSP data with column mapping
+        df = db_manager.read_table_as_dataframe(
+            "msp_measures",
+            latest_batch,
+            MSP_COLUMN_MAPPING
+        )
+        
+    elif table_type == "mapping_floor":
+        # Get latest Floor mapping batch
+        latest_batch = db_manager.get_latest_batch_id("kostenstelle_mapping_floor", "BULK_IMPORT_%")
+        if not latest_batch:
+            raise ValueError("No Floor mapping data found in database")
+        
+        # Read Floor mapping data with column mapping
+        df = db_manager.read_table_as_dataframe(
+            "kostenstelle_mapping_floor",
+            latest_batch,
+            FLOOR_MAPPING_COLUMNS
+        )
+        
+    elif table_type == "mapping_hq":
+        # Get latest HQ mapping batch
+        latest_batch = db_manager.get_latest_batch_id("kostenstelle_mapping_hq", "HQ_FIX_%")
+        if not latest_batch:
+            raise ValueError("No HQ mapping data found in database")
+        
+        # Read HQ mapping data with column mapping
+        df = db_manager.read_table_as_dataframe(
+            "kostenstelle_mapping_hq",
+            latest_batch,
+            HQ_MAPPING_COLUMNS
+        )
+        
+    else:
+        raise ValueError(f"Unknown table type: {table_type}")
+    
+    return df
+
+def save_to_database_as_json(table_name: str, data: Any) -> None:
+    """
+    Save processed data to a results table in the database
+    This replaces saving JSON files to blob storage
+    """
+    logger.info(f"Saving processed data to database table: {table_name}")
+    
+    try:
+        # STEP 1: Clean the data to remove circular references BEFORE JSON encoding
+        logger.info("🧹 Cleaning data to remove circular references...")
+        clean_data = make_json_serializable(data)
+        
+        # STEP 2: Convert cleaned data to JSON string
+        logger.info("📝 Converting to JSON...")
+        json_data = json.dumps(clean_data, cls=JSONEncoder, separators=(',', ':'))
+        
+        # STEP 3: Create timestamp for this processing run
+        timestamp = datetime.now()
+        
+        # STEP 4: Create results table if it doesn't exist
+        create_results_table_query = text("""
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'processing_results')
+            BEGIN
+                CREATE TABLE processing_results (
+                    id INT IDENTITY(1,1) PRIMARY KEY,
+                    result_type NVARCHAR(100) NOT NULL,
+                    data NVARCHAR(MAX) NOT NULL,
+                    created_at DATETIME2 NOT NULL,
+                    processing_date NVARCHAR(50)
+                )
+            END
+        """)
+        
+        # STEP 5: Save to database
+        with db_manager.engine.connect() as conn:
+            # Create table if needed
+            conn.execute(create_results_table_query)
+            conn.commit()
+            
+            # Delete previous results of the same type
+            delete_query = text("DELETE FROM processing_results WHERE result_type = :result_type")
+            conn.execute(delete_query, {"result_type": table_name})
+            
+            # Insert new result
+            insert_query = text("""
+                INSERT INTO processing_results (result_type, data, created_at, processing_date)
+                VALUES (:result_type, :data, :created_at, :processing_date)
+            """)
+            
+            conn.execute(insert_query, {
+                "result_type": table_name,
+                "data": json_data,
+                "created_at": timestamp,
+                "processing_date": timestamp.isoformat()
+            })
+            conn.commit()
+            
+        logger.info(f"✅ Successfully saved {table_name} to database")
+        
+    except Exception as e:
+        logger.error(f"❌ Error saving {table_name} to database: {str(e)}")
+        # Don't re-raise the exception with undefined variables
+        raise Exception(f"Failed to save {table_name} to database: {str(e)}")
+
+def read_previous_processed_data() -> Dict:
+    """
+    Read previously processed data from database
+    This replaces reading the transactions.json file from blob storage
+    """
+    try:
+        query = text("""
+            SELECT data 
+            FROM processing_results 
+            WHERE result_type = 'transactions'
+            ORDER BY created_at DESC
+        """)
+        
+        with db_manager.engine.connect() as conn:
+            result = conn.execute(query).fetchone()
+            
+            if result:
+                previous_data = json.loads(result[0])
+                logger.info("Successfully loaded previous processed data from database")
+                return previous_data
+            else:
+                logger.warning("No previous processed data found in database")
+                return {"transactions": [], "parked_measures": []}
+                
+    except Exception as e:
+        logger.warning(f"Could not load previous data from database: {str(e)}")
+        return {"transactions": [], "parked_measures": []}
+
+# -----------------------------------------------------------------------------
+# Main function - MODIFIED FOR DATABASE
 # -----------------------------------------------------------------------------
 
 def main() -> None:
     """
-    Main function to process the daily data from raw containers
+    Main function to process the daily data from database tables
     """
     start_time = time.time()
-    logger.info('Data processing started at: %s', datetime.now())
+    logger.info('🚀 Database-integrated data processing started at: %s', datetime.now())
     
     try:
-        # Step 1: Extract data from mock-data container
-        logger.info("Loading data from mock-data container...")
-        sap_data = read_from_blob("mock-data", "SAPData.xlsx")
-        msp_data = read_from_blob("mock-data", "MSPData.xlsx")
-        mapping_floor = read_from_blob("mock-data", "MappingU.xlsx", sheet_name="Floor")
-        mapping_hq = read_from_blob("mock-data", "MappingU.xlsx", sheet_name="HQ")
+        # Step 0: Test database connection
+        if not db_manager.test_connection():
+            raise ConnectionError("Cannot connect to database")
+        
+        # Step 1: Extract data from database tables (REPLACES BLOB READING)
+        logger.info("📊 Loading data from database tables...")
+        sap_data = read_from_database("sap")
+        msp_data = read_from_database("msp")
+        mapping_floor = read_from_database("mapping_floor")
+        mapping_hq = read_from_database("mapping_hq")
         
         # Log column names for debugging
         logger.info(f"SAP data columns: {sap_data.columns.tolist()}")
@@ -230,15 +613,11 @@ def main() -> None:
         logger.info(f"Mapping Floor columns: {mapping_floor.columns.tolist()}")
         logger.info(f"Mapping HQ columns: {mapping_hq.columns.tolist()}")
         
-        # Retrieve previous processed data for comparison and tracking
-        try:
-            previous_data = read_from_blob("processed-data", "transactions.json", as_json=True)
-        except Exception as e:
-            logger.warning(f"No previous data found, initializing: {str(e)}")
-            previous_data = {"transactions": [], "parked_measures": []}
+        # Retrieve previous processed data for comparison and tracking (FROM DATABASE)
+        previous_data = read_previous_processed_data()
         
         # Step 2: Create indexes for faster lookups
-        logger.info("Creating indexes for data lookups...")
+        logger.info("🔍 Creating indexes for data lookups...")
         msp_index = create_msp_index(msp_data)
         mapping_index = create_mapping_index(mapping_floor, mapping_hq)
         previous_parked_index = create_previous_parked_index(previous_data)
@@ -249,7 +628,7 @@ def main() -> None:
         department_cache.clear()
         
         # Step 3: Process data in batches with parallelization
-        logger.info("Processing data in parallel batches...")
+        logger.info("⚡ Processing data in parallel batches...")
         processed_data = process_data_in_batches(
             sap_data, 
             msp_data, 
@@ -259,24 +638,386 @@ def main() -> None:
             previous_data
         )
         
-        # Step 4: Save processed data to processed-data container
-        logger.info("Saving processed data...")
-        save_to_blob("processed-data", "transactions.json", processed_data)
+        # Step 4: Save processed data to database (REPLACES BLOB SAVING)
+        logger.info("💾 Saving processed data to database...")
+        save_to_database_as_json("transactions", processed_data)
         
-        # Step 5: Generate frontend-specific views
-        logger.info("Generating frontend views...")
-        generate_frontend_views(processed_data)
+        # Step 5: Generate frontend-specific views (SAVES TO DATABASE)
+        logger.info("🎨 Generating frontend views...")
+        generate_frontend_views_to_database(processed_data)
         
         elapsed_time = time.time() - start_time
-        logger.info('Data processing completed successfully in %.2f seconds at: %s', 
+        logger.info('✅ Database-integrated processing completed successfully in %.2f seconds at: %s', 
                    elapsed_time, datetime.now())
     
     except Exception as e:
-        logger.error('Error in data processing: %s', str(e), exc_info=True)
+        logger.error('❌ Error in data processing: %s', str(e), exc_info=True)
         raise
 
 # -----------------------------------------------------------------------------
-# Indexing functions
+# MODIFIED FRONTEND VIEW GENERATION FOR DATABASE
+# -----------------------------------------------------------------------------
+
+def generate_frontend_views_to_database(processed_data: Dict) -> None:
+    """
+    Generate specialized views for frontend consumption and save to database
+    REPLACES the blob storage approach with database storage
+    """
+    start_time = time.time()
+    
+    # 1. Department-level view with location type
+    departments = {}
+    
+    # SAFETY CHECK: Ensure transactions is a list and contains valid dictionaries
+    transactions = processed_data.get('transactions', [])
+    if not isinstance(transactions, list):
+        logger.error(f"Expected transactions to be a list, got {type(transactions)}")
+        transactions = []
+    
+    for tx in transactions:
+        # SAFETY CHECK: Ensure tx is a dictionary
+        if not isinstance(tx, dict):
+            logger.warning(f"Skipping invalid transaction item: {type(tx)} - {str(tx)[:100]}")
+            continue
+            
+        # Get department with empty string fallback
+        dept = tx.get('department', '')
+        if not dept:
+            continue
+        
+        # Get location type with 'Unknown' fallback
+        location_type = tx.get('location_type', 'Unknown')
+            
+        # The key now includes the department name and location type
+        dept_key = f"{dept}|{location_type}"
+        
+        if dept_key not in departments:
+            departments[dept_key] = {
+                'name': dept,
+                'location_type': location_type,  # Add the location type
+                'booked_amount': 0,
+                'reserved_amount': 0,
+                'regions': set()
+            }
+        
+        # Add to appropriate budget category
+        if tx.get('budget_impact') == 'Booked':
+            amount_val = tx.get('amount', 0) or tx.get('actual_amount', 0)
+            departments[dept_key]['booked_amount'] += safe_float_conversion(amount_val)
+        elif tx.get('budget_impact') == 'Reserved':
+            departments[dept_key]['reserved_amount'] += safe_float_conversion(tx.get('estimated_amount', 0))
+            
+        # Track regions - skip empty region values
+        region = tx.get('region', '')
+        if region:
+            departments[dept_key]['regions'].add(region)
+    
+    # Convert to list and finalize
+    departments_list = []
+    for dept_key, dept_data in departments.items():
+        dept_data['regions'] = list(dept_data['regions'])
+        dept_data['total_amount'] = dept_data['booked_amount'] + dept_data['reserved_amount']
+        departments_list.append(dept_data)
+    
+    # 2. Region-level view with location type
+    regions = {}
+    
+    for tx in transactions:
+        # SAFETY CHECK: Ensure tx is a dictionary
+        if not isinstance(tx, dict):
+            continue
+            
+        # Get region and department with empty string fallback
+        region = tx.get('region', '')
+        dept = tx.get('department', '')
+        
+        if not region or not dept:
+            continue
+        
+        # Get location type with 'Unknown' fallback
+        location_type = tx.get('location_type', 'Unknown')
+            
+        # The key now includes the department, region, and location type
+        region_key = f"{dept}|{region}|{location_type}"
+        
+        if region_key not in regions:
+            regions[region_key] = {
+                'department': dept,
+                'name': region,
+                'location_type': location_type,  # Add the location type
+                'booked_amount': 0,
+                'reserved_amount': 0,
+                'districts': set()
+            }
+        
+        # Add to appropriate budget category
+        if tx.get('budget_impact') == 'Booked':
+            amount_val = tx.get('amount', 0) or tx.get('actual_amount', 0)
+            regions[region_key]['booked_amount'] += safe_float_conversion(amount_val)
+        elif tx.get('budget_impact') == 'Reserved':
+            regions[region_key]['reserved_amount'] += safe_float_conversion(tx.get('estimated_amount', 0))
+            
+        # Track districts - skip empty district values
+        district = tx.get('district', '')
+        if district:
+            regions[region_key]['districts'].add(district)
+    
+    # Convert to list and finalize
+    regions_list = []
+    for region_key, region_data in regions.items():
+        region_data['districts'] = list(region_data['districts'])
+        region_data['total_amount'] = region_data['booked_amount'] + region_data['reserved_amount']
+        regions_list.append(region_data)
+    
+    # 3. Awaiting assignment view (UNASSIGNED measures grouped by department and location type)
+    awaiting_assignment = {}
+    
+    # Look for UNASSIGNED_MEASURE transactions in all transactions (not just parked_measures)
+    for transaction in transactions:
+        # SAFETY CHECK: Ensure transaction is a dictionary
+        if not isinstance(transaction, dict):
+            continue
+            
+        # FIXED: Look for UNASSIGNED_MEASURE category instead of checking status
+        if transaction.get('category') != 'UNASSIGNED_MEASURE':
+            continue
+            
+        # Double-check status to be sure
+        if transaction.get('status') != 'Awaiting Assignment':
+            continue
+            
+        # Get department with empty string fallback
+        dept = transaction.get('department', '')
+        location_type = transaction.get('location_type', 'Unknown')
+        
+        if not dept:
+            # If no department, put in 'Unassigned' category
+            dept = 'Unassigned'
+        
+        # Use simple department name as key (not combined with location_type)
+        # This is what the frontend expects based on your API structure
+        if dept not in awaiting_assignment:
+            awaiting_assignment[dept] = []
+            
+        # Create a safe version of the measure data
+        safe_measure = {
+            'measure_id': transaction.get('measure_id', ''),
+            'bestellnummer': transaction.get('bestellnummer', 0),
+            'measure_title': transaction.get('measure_title', ''),
+            'estimated_amount': safe_float_conversion(transaction.get('estimated_amount', 0)),
+            'measure_date': transaction.get('measure_date', ''),
+            'department': dept,
+            'location_type': location_type,
+            'name': transaction.get('name', ''),
+            'text': transaction.get('text', ''),  # Add text field
+            'status': transaction.get('status', ''),
+            'category': transaction.get('category', '')
+        }
+            
+        awaiting_assignment[dept].append(safe_measure)
+    
+    # 4. BULLETPROOF Budget allocation preservation - MODIFIED FOR DATABASE
+    logger.info("🔒 BULLETPROOF BUDGET PRESERVATION - Starting with database storage...")
+    
+    # STEP 1: Always load existing budget data FIRST (never start from scratch)
+    try:
+        existing_budget = read_budget_allocation_from_database()
+        logger.info(f"✅ Loaded existing budget file with {len(existing_budget.get('departments', {}))} departments")
+        
+        # Ensure structure exists
+        if 'departments' not in existing_budget:
+            existing_budget['departments'] = {}
+        if 'regions' not in existing_budget:
+            existing_budget['regions'] = {}
+            
+    except Exception as e:
+        logger.info(f"📝 No existing budget file found, creating new one: {str(e)}")
+        existing_budget = {
+            'departments': {},
+            'regions': {},
+            'last_updated': None
+        }
+    
+    # STEP 2: PRESERVE ALL EXISTING BUDGET DATA (never overwrite non-zero budgets)
+    preserved_departments = existing_budget['departments'].copy()
+    preserved_regions = existing_budget['regions'].copy()
+    
+    logger.info(f"🔒 PRESERVING {len(preserved_departments)} existing department budgets")
+    logger.info(f"🔒 PRESERVING {len(preserved_regions)} existing region budgets")
+    
+    # STEP 3: Only ADD new departments/regions with zero budgets (never modify existing)
+    new_departments_added = 0
+    new_regions_added = 0
+    
+    # Add new departments (only if they don't exist)
+    for dept in departments_list:
+        dept_key = f"{dept['name']}|{dept['location_type']}"
+        
+        if dept_key not in preserved_departments:
+            preserved_departments[dept_key] = {
+                'allocated_budget': 0,  # Only new departments get 0
+                'location_type': dept['location_type']
+            }
+            new_departments_added += 1
+            logger.info(f"➕ ADDED new department: {dept_key}")
+        else:
+            # Log that we're preserving existing budget
+            existing_budget_amount = preserved_departments[dept_key].get('allocated_budget', 0)
+            logger.info(f"🔒 PRESERVED department: {dept_key} (budget: €{existing_budget_amount:,.2f})")
+    
+    # Add new regions (only if they don't exist)
+    for region in regions_list:
+        region_key = f"{region['department']}|{region['name']}|{region['location_type']}"
+        
+        if region_key not in preserved_regions:
+            preserved_regions[region_key] = {
+                'allocated_budget': 0,  # Only new regions get 0
+                'location_type': region['location_type']
+            }
+            new_regions_added += 1
+            logger.info(f"➕ ADDED new region: {region_key}")
+        else:
+            # Log that we're preserving existing budget
+            existing_budget_amount = preserved_regions[region_key].get('allocated_budget', 0)
+            logger.info(f"🔒 PRESERVED region: {region_key} (budget: €{existing_budget_amount:,.2f})")
+    
+    # STEP 4: Create the final budget allocation (all existing data preserved)
+    final_budget_allocation = {
+        'departments': preserved_departments,
+        'regions': preserved_regions,
+        'last_updated': existing_budget.get('last_updated')  # Don't change timestamp unless budgets were actually modified
+    }
+    
+    # STEP 5: Calculate preservation statistics
+    total_preserved_budget = 0
+    non_zero_departments = 0
+    
+    for dept_data in preserved_departments.values():
+        budget = dept_data.get('allocated_budget', 0)
+        if budget > 0:
+            non_zero_departments += 1
+            total_preserved_budget += budget
+    
+    logger.info(f"💰 BUDGET PRESERVATION SUMMARY:")
+    logger.info(f"   - Preserved departments: {len(preserved_departments)}")
+    logger.info(f"   - Departments with budgets: {non_zero_departments}")
+    logger.info(f"   - Total preserved budget: €{total_preserved_budget:,.2f}")
+    logger.info(f"   - New departments added: {new_departments_added}")
+    logger.info(f"   - New regions added: {new_regions_added}")
+    
+    # STEP 6: Save with backup logic TO DATABASE
+    try:
+        # First, create a backup of the current budget allocation
+        create_budget_backup_in_database()
+        
+        # Save the preserved budget data TO DATABASE
+        save_budget_allocation_to_database(final_budget_allocation)
+        logger.info(f"💾 Successfully saved budget data with ALL existing budgets preserved")
+        
+    except Exception as save_error:
+        logger.error(f"❌ CRITICAL: Failed to save budget data: {str(save_error)}")
+        raise  # Don't continue if we can't save budgets
+    
+    logger.info("🔒 BULLETPROOF BUDGET PRESERVATION - Completed successfully")
+    
+    # Save the views to database in parallel
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        executor.submit(save_to_database_as_json, "frontend_departments", {'departments': departments_list})
+        executor.submit(save_to_database_as_json, "frontend_regions", {'regions': regions_list})
+        executor.submit(save_to_database_as_json, "frontend_awaiting_assignment", awaiting_assignment)
+    
+    elapsed_time = time.time() - start_time
+    logger.info(f"Generated frontend views in {elapsed_time:.2f} seconds")
+
+# -----------------------------------------------------------------------------
+# DATABASE BUDGET MANAGEMENT FUNCTIONS
+# -----------------------------------------------------------------------------
+
+def read_budget_allocation_from_database() -> Dict:
+    """
+    Read budget allocation data from database
+    """
+    try:
+        query = text("""
+            SELECT data 
+            FROM processing_results 
+            WHERE result_type = 'budget_allocation'
+            ORDER BY created_at DESC
+        """)
+        
+        with db_manager.engine.connect() as conn:
+            result = conn.execute(query).fetchone()
+            
+            if result:
+                budget_data = json.loads(result[0])
+                logger.info("Successfully loaded budget allocation from database")
+                return budget_data
+            else:
+                logger.warning("No budget allocation found in database")
+                return {"departments": {}, "regions": {}, "last_updated": None}
+                
+    except Exception as e:
+        logger.warning(f"Could not load budget allocation from database: {str(e)}")
+        return {"departments": {}, "regions": {}, "last_updated": None}
+
+def save_budget_allocation_to_database(budget_data: Dict) -> None:
+    """
+    Save budget allocation data to database
+    """
+    try:
+        # Validate budget integrity first
+        validate_budget_integrity(budget_data)
+        
+        # Save to database using the same mechanism as other results
+        save_to_database_as_json("budget_allocation", budget_data)
+        logger.info("✅ Budget allocation saved to database successfully")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to save budget allocation: {str(e)}")
+        raise
+
+def create_budget_backup_in_database() -> str:
+    """
+    Create a timestamped backup of the current budget allocation in database
+    """
+    try:
+        current_budget = read_budget_allocation_from_database()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_name = f"budget_allocation_backup_{timestamp}"
+        
+        # Save backup with timestamped name
+        save_to_database_as_json(backup_name, current_budget)
+        logger.info(f"✅ Budget backup created: {backup_name}")
+        return backup_name
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to create budget backup: {str(e)}")
+        return None
+
+def validate_budget_integrity(budget_data):
+    """
+    Validate that budget data is not accidentally corrupted
+    """
+    if not isinstance(budget_data, dict):
+        raise ValueError("Budget data must be a dictionary")
+    
+    if 'departments' not in budget_data or 'regions' not in budget_data:
+        raise ValueError("Budget data missing required sections")
+    
+    # Check for reasonable budget values
+    total_budget = 0
+    for dept_data in budget_data['departments'].values():
+        budget = dept_data.get('allocated_budget', 0)
+        if budget < 0:
+            raise ValueError(f"Negative budget found: {budget}")
+        total_budget += budget
+    
+    # Log validation results
+    logger.info(f"✅ Budget validation passed - Total budget: €{total_budget:,.2f}")
+    return True
+
+# -----------------------------------------------------------------------------
+# Indexing functions (UNCHANGED - they work with DataFrames)
 # -----------------------------------------------------------------------------
 
 def create_msp_index(msp_data: pd.DataFrame) -> Dict[int, pd.Series]:
@@ -346,7 +1087,7 @@ def create_previous_parked_index(previous_data: Dict) -> Dict[int, Dict]:
     return previous_parked_index
 
 # -----------------------------------------------------------------------------
-# Batch processing functions
+# Batch processing functions (UNCHANGED - they work with DataFrames)
 # -----------------------------------------------------------------------------
 
 def process_data_in_batches(
@@ -677,7 +1418,7 @@ def infer_location_type_from_department(department: str) -> str:
     return 'Unknown'
 
 # -----------------------------------------------------------------------------
-# Cached helper functions
+# Cached helper functions (FIXED - removed excessive logging)
 # -----------------------------------------------------------------------------
 
 @functools.lru_cache(maxsize=1024)
@@ -738,9 +1479,6 @@ def map_kostenstelle_cached(kostenstelle: str, mapping_index: Dict[str, Location
         # Floor Kostenstelle - extract digits 2-6 (to get the 5 digits after the leading '3')
         # For example: 35020400 → 50204
         extracted_digits = kostenstelle[1:6]
-        
-        # Log for debugging
-        logger.info(f"Extracted Kostenstelle digits: {extracted_digits} from {kostenstelle}")
         
         # First try direct lookup
         result = mapping_index.get(extracted_digits)
@@ -838,395 +1576,88 @@ def extract_department_from_gruppen_cached(gruppen_field: str) -> Optional[str]:
     return result
 
 # -----------------------------------------------------------------------------
-# IO functions
+# API FUNCTIONS FOR EXTERNAL ACCESS
 # -----------------------------------------------------------------------------
 
-def read_from_blob(container_name: str, blob_name: str, sheet_name=None, as_json=False) -> Any:
+def get_processed_data_from_database(result_type: str = "transactions") -> Dict:
     """
-    Read data from Azure Blob Storage using the appropriate container client
+    API function to retrieve processed data from database
     """
-    logger.info(f"Reading {blob_name} from {container_name} container")
-    
-    start_time = time.time()
-    
-    # Select the appropriate container client
-    if container_name == "mock-data":
-        container_client = mock_data_container_client
-    elif container_name == "processed-data":
-        container_client = processed_data_container_client
-    else:
-        raise ValueError(f"Unknown container name: {container_name}")
-    
-    # Get blob client for the blob
-    blob_client = container_client.get_blob_client(blob_name)
-    
-    # Download the blob
     try:
-        download_stream = blob_client.download_blob()
+        query = text("""
+            SELECT data 
+            FROM processing_results 
+            WHERE result_type = :result_type
+            ORDER BY created_at DESC
+        """)
         
-        if blob_name.endswith('.csv'):
-            # For CSV files
-            content = download_stream.readall()
-            data = pd.read_csv(io.BytesIO(content))
-        elif blob_name.endswith('.xlsx'):
-            # For Excel files
-            content = download_stream.readall()
-            if sheet_name:
-                # Read specific sheet if provided
-                data = pd.read_excel(io.BytesIO(content), sheet_name=sheet_name)
+        with db_manager.engine.connect() as conn:
+            result = conn.execute(query, {"result_type": result_type}).fetchone()
+            
+            if result:
+                data = json.loads(result[0])
+                logger.info(f"Retrieved {result_type} data from database")
+                return data
             else:
-                # Read first sheet if no sheet name provided
-                data = pd.read_excel(io.BytesIO(content))
-        elif as_json:
-            # For JSON files
-            content = download_stream.readall()
-            data = json.loads(content.decode('utf-8'))
-        else:
-            # For other blob types
-            data = download_stream.readall()
+                logger.warning(f"No {result_type} data found in database")
+                return {}
+                
     except Exception as e:
-        logger.error(f"Error reading blob {blob_name}: {str(e)}")
+        logger.error(f"Error retrieving {result_type} data: {str(e)}")
         raise
-    
-    elapsed_time = time.time() - start_time
-    logger.info(f"Read {blob_name} in {elapsed_time:.2f} seconds")
-    return data
 
-def save_to_blob(container_name: str, blob_name: str, data: Any) -> None:
+def get_all_available_results() -> List[str]:
     """
-    Save data to Azure Blob Storage using the appropriate container client
+    Get list of all available result types in the database
     """
-    logger.info(f"Saving {blob_name} to {container_name} container")
-    
-    start_time = time.time()
-    
-    # Select the appropriate container client
-    if container_name == "mock-data":
-        container_client = mock_data_container_client
-    elif container_name == "processed-data":
-        container_client = processed_data_container_client
-    else:
-        raise ValueError(f"Unknown container name: {container_name}")
-    
-    # Get blob client for the blob
-    blob_client = container_client.get_blob_client(blob_name)
-    
-    # Prepare data for upload
-    if isinstance(data, dict):
-        # Use the custom JSONEncoder to handle pandas types
-        upload_data = json.dumps(data, indent=2, cls=JSONEncoder).encode('utf-8')
-    else:
-        upload_data = data
-    
-    # Upload the blob
     try:
-        blob_client.upload_blob(upload_data, overwrite=True)
+        query = text("""
+            SELECT DISTINCT result_type, MAX(created_at) as latest
+            FROM processing_results 
+            GROUP BY result_type
+            ORDER BY latest DESC
+        """)
+        
+        with db_manager.engine.connect() as conn:
+            results = conn.execute(query).fetchall()
+            return [row[0] for row in results]
+            
     except Exception as e:
-        logger.error(f"Error uploading blob {blob_name}: {str(e)}")
-        raise
-    
-    elapsed_time = time.time() - start_time
-    logger.info(f"Saved {blob_name} in {elapsed_time:.2f} seconds")
+        logger.error(f"Error getting available results: {str(e)}")
+        return []
 
 # -----------------------------------------------------------------------------
-# Frontend view generation
+# MAIN EXECUTION
 # -----------------------------------------------------------------------------
 
-def generate_frontend_views(processed_data: Dict) -> None:
-    """
-    Generate specialized views for frontend consumption with BULLETPROOF budget preservation
-    """
-    start_time = time.time()
-    
-    # 1. Department-level view with location type
-    departments = {}
-    
-    for tx in processed_data['transactions']:
-        # Get department with empty string fallback
-        dept = tx.get('department', '')
-        if not dept:
-            continue
-        
-        # Get location type with 'Unknown' fallback
-        location_type = tx.get('location_type', 'Unknown')
-            
-        # The key now includes the department name and location type
-        dept_key = f"{dept}|{location_type}"
-        
-        if dept_key not in departments:
-            departments[dept_key] = {
-                'name': dept,
-                'location_type': location_type,  # Add the location type
-                'booked_amount': 0,
-                'reserved_amount': 0,
-                'regions': set()
-            }
-        
-        # Add to appropriate budget category
-        if tx.get('budget_impact') == 'Booked':
-            amount_val = tx.get('amount', 0) or tx.get('actual_amount', 0)
-            departments[dept_key]['booked_amount'] += safe_float_conversion(amount_val)
-        elif tx.get('budget_impact') == 'Reserved':
-            departments[dept_key]['reserved_amount'] += safe_float_conversion(tx.get('estimated_amount', 0))
-            
-        # Track regions - skip empty region values
-        region = tx.get('region', '')
-        if region:
-            departments[dept_key]['regions'].add(region)
-    
-    # Convert to list and finalize
-    departments_list = []
-    for dept_key, dept_data in departments.items():
-        dept_data['regions'] = list(dept_data['regions'])
-        dept_data['total_amount'] = dept_data['booked_amount'] + dept_data['reserved_amount']
-        departments_list.append(dept_data)
-    
-    # 2. Region-level view with location type
-    regions = {}
-    
-    for tx in processed_data['transactions']:
-        # Get region and department with empty string fallback
-        region = tx.get('region', '')
-        dept = tx.get('department', '')
-        
-        if not region or not dept:
-            continue
-        
-        # Get location type with 'Unknown' fallback
-        location_type = tx.get('location_type', 'Unknown')
-            
-        # The key now includes the department, region, and location type
-        region_key = f"{dept}|{region}|{location_type}"
-        
-        if region_key not in regions:
-            regions[region_key] = {
-                'department': dept,
-                'name': region,
-                'location_type': location_type,  # Add the location type
-                'booked_amount': 0,
-                'reserved_amount': 0,
-                'districts': set()
-            }
-        
-        # Add to appropriate budget category
-        if tx.get('budget_impact') == 'Booked':
-            amount_val = tx.get('amount', 0) or tx.get('actual_amount', 0)
-            regions[region_key]['booked_amount'] += safe_float_conversion(amount_val)
-        elif tx.get('budget_impact') == 'Reserved':
-            regions[region_key]['reserved_amount'] += safe_float_conversion(tx.get('estimated_amount', 0))
-            
-        # Track districts - skip empty district values
-        district = tx.get('district', '')
-        if district:
-            regions[region_key]['districts'].add(district)
-    
-    # Convert to list and finalize
-    regions_list = []
-    for region_key, region_data in regions.items():
-        region_data['districts'] = list(region_data['districts'])
-        region_data['total_amount'] = region_data['booked_amount'] + region_data['reserved_amount']
-        regions_list.append(region_data)
-    
-    # 3. Awaiting assignment view (UNASSIGNED measures grouped by department and location type)
-    awaiting_assignment = {}
-    
-    # Look for UNASSIGNED_MEASURE transactions in all transactions (not just parked_measures)
-    for transaction in processed_data['transactions']:
-        # FIXED: Look for UNASSIGNED_MEASURE category instead of checking status
-        if transaction.get('category') != 'UNASSIGNED_MEASURE':
-            continue
-            
-        # Double-check status to be sure
-        if transaction.get('status') != 'Awaiting Assignment':
-            continue
-            
-        # Get department with empty string fallback
-        dept = transaction.get('department', '')
-        location_type = transaction.get('location_type', 'Unknown')
-        
-        if not dept:
-            # If no department, put in 'Unassigned' category
-            dept = 'Unassigned'
-        
-        # Use simple department name as key (not combined with location_type)
-        # This is what the frontend expects based on your API structure
-        if dept not in awaiting_assignment:
-            awaiting_assignment[dept] = []
-            
-        # Create a safe version of the measure data
-        safe_measure = {
-            'measure_id': transaction.get('measure_id', ''),
-            'bestellnummer': transaction.get('bestellnummer', 0),
-            'measure_title': transaction.get('measure_title', ''),
-            'estimated_amount': safe_float_conversion(transaction.get('estimated_amount', 0)),
-            'measure_date': transaction.get('measure_date', ''),
-            'department': dept,
-            'location_type': location_type,
-            'name': transaction.get('name', ''),
-            'text': transaction.get('text', ''),  # Add text field
-            'status': transaction.get('status', ''),
-            'category': transaction.get('category', '')
-        }
-            
-        awaiting_assignment[dept].append(safe_measure)
-    
-    # 4. BULLETPROOF Budget allocation preservation
-    logger.info("🔒 BULLETPROOF BUDGET PRESERVATION - Starting...")
-    
-    # STEP 1: Always load existing budget data FIRST (never start from scratch)
+if __name__ == "__main__":
     try:
-        existing_budget = read_from_blob("processed-data", "budget_allocation.json", as_json=True)
-        logger.info(f"✅ Loaded existing budget file with {len(existing_budget.get('departments', {}))} departments")
+        # Check if database password is set
+        if not DB_PASSWORD:
+            print("❌ ERROR: DB_PASSWORD environment variable not set!")
+            print("\nPlease set the database password using one of these methods:")
+            print("1. Command Prompt: set DB_PASSWORD=your_password")
+            print("2. PowerShell: $env:DB_PASSWORD=\"your_password\"")
+            print("3. Add to Windows Environment Variables permanently")
+            print("\nAlternatively, you can set it in the script temporarily for testing:")
+            print("Add this line after the imports: os.environ['DB_PASSWORD'] = 'your_password'")
+            exit(1)
         
-        # Ensure structure exists
-        if 'departments' not in existing_budget:
-            existing_budget['departments'] = {}
-        if 'regions' not in existing_budget:
-            existing_budget['regions'] = {}
-            
+        logger.info(f"🔐 Using database password: {'*' * len(str(DB_PASSWORD))}")
+        
+        # Test database connection first
+        logger.info("🔌 Testing database connection...")
+        if not db_manager.test_connection():
+            logger.error("❌ Database connection test failed!")
+            exit(1)
+        
+        # Run the main processing function
+        main()
+        
+        # Optional: Print summary of available results
+        available_results = get_all_available_results()
+        logger.info(f"✅ Available results in database: {available_results}")
+        
     except Exception as e:
-        logger.info(f"📝 No existing budget file found, creating new one: {str(e)}")
-        existing_budget = {
-            'departments': {},
-            'regions': {},
-            'last_updated': None
-        }
-    
-    # STEP 2: PRESERVE ALL EXISTING BUDGET DATA (never overwrite non-zero budgets)
-    preserved_departments = existing_budget['departments'].copy()
-    preserved_regions = existing_budget['regions'].copy()
-    
-    logger.info(f"🔒 PRESERVING {len(preserved_departments)} existing department budgets")
-    logger.info(f"🔒 PRESERVING {len(preserved_regions)} existing region budgets")
-    
-    # STEP 3: Only ADD new departments/regions with zero budgets (never modify existing)
-    new_departments_added = 0
-    new_regions_added = 0
-    
-    # Add new departments (only if they don't exist)
-    for dept in departments_list:
-        dept_key = f"{dept['name']}|{dept['location_type']}"
-        
-        if dept_key not in preserved_departments:
-            preserved_departments[dept_key] = {
-                'allocated_budget': 0,  # Only new departments get 0
-                'location_type': dept['location_type']
-            }
-            new_departments_added += 1
-            logger.info(f"➕ ADDED new department: {dept_key}")
-        else:
-            # Log that we're preserving existing budget
-            existing_budget_amount = preserved_departments[dept_key].get('allocated_budget', 0)
-            logger.info(f"🔒 PRESERVED department: {dept_key} (budget: €{existing_budget_amount:,.2f})")
-    
-    # Add new regions (only if they don't exist)
-    for region in regions_list:
-        region_key = f"{region['department']}|{region['name']}|{region['location_type']}"
-        
-        if region_key not in preserved_regions:
-            preserved_regions[region_key] = {
-                'allocated_budget': 0,  # Only new regions get 0
-                'location_type': region['location_type']
-            }
-            new_regions_added += 1
-            logger.info(f"➕ ADDED new region: {region_key}")
-        else:
-            # Log that we're preserving existing budget
-            existing_budget_amount = preserved_regions[region_key].get('allocated_budget', 0)
-            logger.info(f"🔒 PRESERVED region: {region_key} (budget: €{existing_budget_amount:,.2f})")
-    
-    # STEP 4: Create the final budget allocation (all existing data preserved)
-    final_budget_allocation = {
-        'departments': preserved_departments,
-        'regions': preserved_regions,
-        'last_updated': existing_budget.get('last_updated')  # Don't change timestamp unless budgets were actually modified
-    }
-    
-    # STEP 5: Calculate preservation statistics
-    total_preserved_budget = 0
-    non_zero_departments = 0
-    
-    for dept_data in preserved_departments.values():
-        budget = dept_data.get('allocated_budget', 0)
-        if budget > 0:
-            non_zero_departments += 1
-            total_preserved_budget += budget
-    
-    logger.info(f"💰 BUDGET PRESERVATION SUMMARY:")
-    logger.info(f"   - Preserved departments: {len(preserved_departments)}")
-    logger.info(f"   - Departments with budgets: {non_zero_departments}")
-    logger.info(f"   - Total preserved budget: €{total_preserved_budget:,.2f}")
-    logger.info(f"   - New departments added: {new_departments_added}")
-    logger.info(f"   - New regions added: {new_regions_added}")
-    
-    # STEP 6: Save with backup logic
-    try:
-        # First, create a backup of the current budget file
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_filename = f"budget_allocation_backup_{timestamp}.json"
-        
-        try:
-            current_budget = read_from_blob("processed-data", "budget_allocation.json", as_json=True)
-            save_to_blob("processed-data", backup_filename, current_budget)
-            logger.info(f"📋 Created backup: {backup_filename}")
-        except:
-            logger.info("📋 No existing budget to backup")
-        
-        # Save the preserved budget data
-        save_to_blob("processed-data", "budget_allocation.json", final_budget_allocation)
-        logger.info(f"💾 Successfully saved budget data with ALL existing budgets preserved")
-        
-    except Exception as save_error:
-        logger.error(f"❌ CRITICAL: Failed to save budget data: {str(save_error)}")
-        raise  # Don't continue if we can't save budgets
-    
-    logger.info("🔒 BULLETPROOF BUDGET PRESERVATION - Completed successfully")
-    
-    # Save the views to blob storage in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-        executor.submit(save_to_blob, "processed-data", "frontend_departments.json", {'departments': departments_list})
-        executor.submit(save_to_blob, "processed-data", "frontend_regions.json", {'regions': regions_list})
-        executor.submit(save_to_blob, "processed-data", "frontend_awaiting_assignment.json", awaiting_assignment)
-    
-    elapsed_time = time.time() - start_time
-    logger.info(f"Generated frontend views in {elapsed_time:.2f} seconds")
-
-
-# ADDITIONAL SAFETY FUNCTIONS (add these if they don't exist)
-def create_budget_backup():
-    """
-    Create a timestamped backup of the current budget allocation
-    """
-    try:
-        current_budget = read_from_blob("processed-data", "budget_allocation.json", as_json=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_filename = f"budget_allocation_backup_{timestamp}.json"
-        save_to_blob("processed-data", backup_filename, current_budget)
-        logger.info(f"✅ Budget backup created: {backup_filename}")
-        return backup_filename
-    except Exception as e:
-        logger.error(f"❌ Failed to create budget backup: {str(e)}")
-        return None
-
-
-def validate_budget_integrity(budget_data):
-    """
-    Validate that budget data is not accidentally corrupted
-    """
-    if not isinstance(budget_data, dict):
-        raise ValueError("Budget data must be a dictionary")
-    
-    if 'departments' not in budget_data or 'regions' not in budget_data:
-        raise ValueError("Budget data missing required sections")
-    
-    # Check for reasonable budget values
-    total_budget = 0
-    for dept_data in budget_data['departments'].values():
-        budget = dept_data.get('allocated_budget', 0)
-        if budget < 0:
-            raise ValueError(f"Negative budget found: {budget}")
-        total_budget += budget
-    
-    # Log validation results
-    logger.info(f"✅ Budget validation passed - Total budget: €{total_budget:,.2f}")
-    return True
+        logger.error(f"💥 Fatal error in main execution: {str(e)}", exc_info=True)
+        exit(1)
