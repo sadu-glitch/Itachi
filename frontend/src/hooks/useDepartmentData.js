@@ -1,9 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 
 /**
- * Custom hook to fetch and manage department and region data
- * @param {string} baseApiUrl - The base API URL
- * @returns {Object} - The department data, loading state, error, and refresh function
+ * Fixed version of useDepartmentData hook with better error handling and debugging
  */
 export const useDepartmentData = (baseApiUrl) => {
   const [departmentsData, setDepartmentsData] = useState({ departments: [] });
@@ -11,110 +9,111 @@ export const useDepartmentData = (baseApiUrl) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   
-  // Use useCallback to memoize the function
   const fetchDepartmentData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
       
+      console.log('🔍 Hook: Starting fetch from:', baseApiUrl);
+      
       // Remove trailing slash if present
-      const normalizedApiUrl = baseApiUrl.endsWith('/') 
+      const normalizedApiUrl = baseApiUrl?.endsWith('/') 
         ? baseApiUrl.slice(0, -1) 
         : baseApiUrl;
         
-      const response = await fetch(`${normalizedApiUrl}/api/data`);
+      const response = await fetch(`${normalizedApiUrl}/api/data`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        }
+      });
+      
+      console.log('🔍 Hook: Response status:', response.status);
+      console.log('🔍 Hook: Response ok:', response.ok);
       
       if (!response.ok) {
-        throw new Error(`Network response was not ok: ${response.status}`);
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
       
       const data = await response.json();
       
-      // ✅ FIX: Store the data correctly without double-wrapping
-      console.log('🔍 API Response Structure:', {
-        fullData: data,
-        departments: data.departments,
-        departmentsIsArray: Array.isArray(data.departments),
-        regions: data.regions,
-        regionsIsArray: Array.isArray(data.regions)
+      console.log('🔍 Hook: Raw API response:', {
+        dataType: typeof data,
+        hasData: !!data,
+        departments: {
+          exists: 'departments' in data,
+          type: typeof data.departments,
+          isArray: Array.isArray(data.departments),
+          value: data.departments
+        },
+        regions: {
+          exists: 'regions' in data,
+          type: typeof data.regions,
+          isArray: Array.isArray(data.regions),
+          value: data.regions
+        },
+        awaitingAssignment: {
+          exists: 'awaiting_assignment' in data,
+          type: typeof data.awaiting_assignment
+        },
+        budgetAllocation: {
+          exists: 'budget_allocation' in data,
+          type: typeof data.budget_allocation
+        }
       });
       
-      // ✅ FIXED: Handle string-encoded JSON from your API
-      const extractDepartments = (deptData) => {
-        // If it's already an array, return it
-        if (Array.isArray(deptData)) {
-          return deptData;
-        }
+      // ✅ SIMPLIFIED: Just use the departments and regions directly from API
+      // If they're arrays, great. If not, we'll handle it simply.
+      
+      let departmentsArray = [];
+      let regionsArray = [];
+      
+      // Handle departments
+      if (Array.isArray(data.departments)) {
+        departmentsArray = data.departments;
+        console.log('✅ Hook: Departments is already an array:', departmentsArray.length);
+      } else if (data.departments) {
+        console.log('⚠️ Hook: Departments is not an array, trying to extract...');
+        console.log('⚠️ Hook: Departments value:', data.departments);
         
-        // If it's a string, try to parse it as JSON
-        if (typeof deptData === 'string') {
-          try {
-            // Replace single quotes with double quotes for valid JSON
-            const jsonString = deptData.replace(/'/g, '"');
-            const parsed = JSON.parse(jsonString);
-            if (Array.isArray(parsed)) {
-              return parsed;
-            }
-          } catch (parseError) {
-            console.error('❌ Failed to parse departments string:', parseError);
+        // Try to convert non-array to array
+        if (typeof data.departments === 'object') {
+          const values = Object.values(data.departments);
+          if (values.length > 0) {
+            departmentsArray = values;
+            console.log('✅ Hook: Converted departments object to array:', departmentsArray.length);
           }
         }
+      } else {
+        console.log('❌ Hook: No departments found in response');
+      }
+      
+      // Handle regions
+      if (Array.isArray(data.regions)) {
+        regionsArray = data.regions;
+        console.log('✅ Hook: Regions is already an array:', regionsArray.length);
+      } else if (data.regions) {
+        console.log('⚠️ Hook: Regions is not an array, trying to extract...');
+        console.log('⚠️ Hook: Regions value:', data.regions);
         
-        // If it's an object, try various extraction methods
-        if (deptData && typeof deptData === 'object') {
-          if (deptData.departments && Array.isArray(deptData.departments)) {
-            return deptData.departments;
-          }
-          const values = Object.values(deptData);
-          if (values.length > 0 && typeof values[0] === 'object' && values[0].name) {
-            return values;
+        // Try to convert non-array to array
+        if (typeof data.regions === 'object') {
+          const values = Object.values(data.regions);
+          if (values.length > 0) {
+            regionsArray = values;
+            console.log('✅ Hook: Converted regions object to array:', regionsArray.length);
           }
         }
-        
-        return [];
-      };
+      } else {
+        console.log('❌ Hook: No regions found in response');
+      }
 
-      const extractRegions = (regData) => {
-        // If it's already an array, return it
-        if (Array.isArray(regData)) {
-          return regData;
-        }
-        
-        // If it's a string, try to parse it as JSON
-        if (typeof regData === 'string') {
-          try {
-            // Replace single quotes with double quotes for valid JSON
-            const jsonString = regData.replace(/'/g, '"');
-            const parsed = JSON.parse(jsonString);
-            if (Array.isArray(parsed)) {
-              return parsed;
-            }
-          } catch (parseError) {
-            console.error('❌ Failed to parse regions string:', parseError);
-          }
-        }
-        
-        // If it's an object, try various extraction methods
-        if (regData && typeof regData === 'object') {
-          if (regData.regions && Array.isArray(regData.regions)) {
-            return regData.regions;
-          }
-          const values = Object.values(regData);
-          if (values.length > 0 && typeof values[0] === 'object' && values[0].name) {
-            return values;
-          }
-        }
-        
-        return [];
-      };
-
-      const departmentsArray = extractDepartments(data.departments);
-      const regionsArray = extractRegions(data.regions);
-
-      console.log('✅ Successfully extracted:', {
+      console.log('🎯 Hook: Final extracted data:', {
         departmentsCount: departmentsArray.length,
         regionsCount: regionsArray.length,
-        sampleDepartment: departmentsArray[0]
+        sampleDepartment: departmentsArray[0],
+        sampleRegion: regionsArray[0]
       });
 
       setDepartmentsData({
@@ -127,23 +126,33 @@ export const useDepartmentData = (baseApiUrl) => {
       
       setLoading(false);
       return data;
+      
     } catch (err) {
-      console.error('❌ useDepartmentData fetch error:', err);
+      console.error('❌ Hook: Fetch error:', err);
+      console.error('❌ Hook: Error details:', {
+        message: err.message,
+        type: err.constructor.name,
+        stack: err.stack
+      });
+      
       setError(err.message);
       setLoading(false);
       
-      // ✅ FIX: Ensure we always have valid array structure even on error
+      // Ensure we always have valid array structure even on error
       setDepartmentsData({ departments: [] });
       setRegionsData({ regions: [] });
       
       throw err;
     }
-  }, [baseApiUrl]); // Add baseApiUrl as a dependency of fetchDepartmentData
+  }, [baseApiUrl]);
   
-  // Fetch data when the component mounts or when fetchDepartmentData changes
+  // Fetch data when the component mounts or when baseApiUrl changes
   useEffect(() => {
     if (baseApiUrl) {
+      console.log('🔍 Hook: useEffect triggered, fetching data...');
       fetchDepartmentData();
+    } else {
+      console.log('❌ Hook: No baseApiUrl provided');
     }
   }, [fetchDepartmentData, baseApiUrl]);
   
