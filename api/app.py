@@ -172,6 +172,192 @@ def get_data():
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"status": "error", "message": str(e)}), 500
+    
+# Add this accurate /api/transactions endpoint to your Flask app.py
+# Based on the actual data structure from your processing code
+
+@app.route('/api/transactions', methods=['GET'])
+def get_transactions():
+    """Get transactions data - accurate version based on processing code structure"""
+    try:
+        logger.info("🔍 Starting /api/transactions request...")
+        
+        # Get query parameters for filtering
+        department = request.args.get('department')
+        region = request.args.get('region')
+        status = request.args.get('status')
+        category = request.args.get('category')
+        
+        logger.info(f"🔍 Filters: department={department}, region={region}, status={status}, category={category}")
+        
+        # Get the complete transactions data from database
+        try:
+            transactions_data = get_processed_data_from_database("transactions")
+            logger.info(f"✅ Loaded transactions data from database: {type(transactions_data)}")
+            
+            # Parse any JSON string fields that might exist
+            transactions_data = safe_parse_json_fields(transactions_data)
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to load transactions: {str(e)}")
+            return jsonify({
+                "transactions": [],
+                "parked_measures": [],
+                "direct_costs": [],
+                "booked_measures": [],
+                "error": "Could not load transactions data",
+                "message": str(e)
+            }), 500
+        
+        # Extract the specific arrays based on your processing code structure
+        all_transactions = transactions_data.get('transactions', [])
+        parked_measures = transactions_data.get('parked_measures', [])
+        direct_costs = transactions_data.get('direct_costs', [])
+        booked_measures = transactions_data.get('booked_measures', [])
+        outliers = transactions_data.get('outliers', [])
+        placeholders = transactions_data.get('placeholders', [])
+        statistics = transactions_data.get('statistics', {})
+        
+        # Parse string representations if needed
+        def ensure_list(data):
+            if isinstance(data, str):
+                try:
+                    return parse_python_string_to_list(data)
+                except:
+                    return []
+            return data if isinstance(data, list) else []
+        
+        all_transactions = ensure_list(all_transactions)
+        parked_measures = ensure_list(parked_measures)
+        direct_costs = ensure_list(direct_costs)
+        booked_measures = ensure_list(booked_measures)
+        outliers = ensure_list(outliers)
+        placeholders = ensure_list(placeholders)
+        
+        logger.info(f"📊 Transaction counts: all={len(all_transactions)}, parked={len(parked_measures)}, direct={len(direct_costs)}, booked={len(booked_measures)}, outliers={len(outliers)}")
+        
+        # Apply filters to the main transactions array (which contains all transaction types)
+        filtered_transactions = all_transactions
+        
+        if department:
+            filtered_transactions = [
+                tx for tx in filtered_transactions 
+                if tx.get('department') == department
+            ]
+            logger.info(f"🔍 After department filter '{department}': {len(filtered_transactions)} transactions")
+        
+        if region:
+            filtered_transactions = [
+                tx for tx in filtered_transactions 
+                if tx.get('region') == region
+            ]
+            logger.info(f"🔍 After region filter '{region}': {len(filtered_transactions)} transactions")
+        
+        if status:
+            filtered_transactions = [
+                tx for tx in filtered_transactions 
+                if tx.get('status') == status
+            ]
+            logger.info(f"🔍 After status filter '{status}': {len(filtered_transactions)} transactions")
+        
+        if category:
+            filtered_transactions = [
+                tx for tx in filtered_transactions 
+                if tx.get('category') == category
+            ]
+            logger.info(f"🔍 After category filter '{category}': {len(filtered_transactions)} transactions")
+        
+        # Also filter parked_measures if department filter is applied (this is what your components need)
+        filtered_parked_measures = parked_measures
+        if department:
+            filtered_parked_measures = [
+                measure for measure in parked_measures 
+                if measure.get('department') == department
+            ]
+            logger.info(f"🔍 Filtered parked measures for '{department}': {len(filtered_parked_measures)} measures")
+        
+        # Build comprehensive response based on your processing code structure
+        response_data = {
+            # Main transactions array (filtered)
+            "transactions": filtered_transactions,
+            
+            # Separate arrays for specific use cases (important for your components)
+            "parked_measures": filtered_parked_measures,
+            "direct_costs": direct_costs,
+            "booked_measures": booked_measures,
+            "outliers": outliers,
+            "placeholders": placeholders,
+            
+            # Statistics from processing
+            "statistics": statistics,
+            
+            # Summary information
+            "summary": {
+                "total_transactions": len(all_transactions),
+                "filtered_transactions": len(filtered_transactions),
+                "by_category": {
+                    "DIRECT_COST": len([tx for tx in all_transactions if tx.get('category') == 'DIRECT_COST']),
+                    "BOOKED_MEASURE": len([tx for tx in all_transactions if tx.get('category') == 'BOOKED_MEASURE']),
+                    "PARKED_MEASURE": len([tx for tx in all_transactions if tx.get('category') == 'PARKED_MEASURE']),
+                    "UNASSIGNED_MEASURE": len([tx for tx in all_transactions if tx.get('category') == 'UNASSIGNED_MEASURE']),
+                    "OUTLIER": len([tx for tx in all_transactions if tx.get('category') == 'OUTLIER'])
+                },
+                "by_budget_impact": {
+                    "Booked": len([tx for tx in all_transactions if tx.get('budget_impact') == 'Booked']),
+                    "Reserved": len([tx for tx in all_transactions if tx.get('budget_impact') == 'Reserved']),
+                    "None": len([tx for tx in all_transactions if tx.get('budget_impact') == 'None'])
+                },
+                "by_location_type": {
+                    "Floor": len([tx for tx in all_transactions if tx.get('location_type') == 'Floor']),
+                    "HQ": len([tx for tx in all_transactions if tx.get('location_type') == 'HQ']),
+                    "Unknown": len([tx for tx in all_transactions if tx.get('location_type') == 'Unknown'])
+                }
+            },
+            
+            # Filters that were applied
+            "filters_applied": {
+                "department": department,
+                "region": region,
+                "status": status,
+                "category": category
+            },
+            
+            # Processing metadata
+            "processing_date": transactions_data.get('processing_date'),
+            "data_source": "Azure SQL Database"
+        }
+        
+        logger.info(f"🎯 Returning {len(filtered_transactions)} transactions with {len(filtered_parked_measures)} parked measures")
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        logger.error(f"❌ Error in /api/transactions: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            "transactions": [],
+            "parked_measures": [],
+            "direct_costs": [],
+            "booked_measures": [],
+            "error": "Failed to fetch transactions",
+            "message": str(e)
+        }), 500
+
+# Helper function to parse JSON string fields (update the existing one or add if missing)
+def safe_parse_json_fields(data):
+    """Helper to parse JSON string fields in transaction data"""
+    if isinstance(data, dict):
+        # These are the keys from your processing code that might be string representations
+        for key in ['transactions', 'parked_measures', 'direct_costs', 'booked_measures', 'outliers', 'placeholders']:
+            if key in data and isinstance(data[key], str):
+                try:
+                    data[key] = parse_python_string_to_list(data[key])
+                    logger.info(f"✅ Parsed {key} from JSON string: {len(data[key])} items")
+                except Exception as e:
+                    logger.error(f"❌ Failed to parse {key}: {str(e)}")
+                    data[key] = []
+    return data
 
 @app.route('/api/debug-data', methods=['GET'])
 def debug_data():
