@@ -2,7 +2,7 @@ import pandas as pd
 import pyodbc
 from datetime import datetime
 
-# Your connection string
+# Your connection stringgg
 connection_string = """
 Driver={ODBC Driver 18 for SQL Server};
 Server=tcp:msp-sap-database-sadu.database.windows.net,1433;
