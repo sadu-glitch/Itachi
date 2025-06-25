@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Header from './components/Header';
-import Dashboard from './components/Dashboard'; // This imports from components/Dashboard/index.js
+import Dashboard from './components/Dashboard';
 import './styles.css';
 
 function App() {
@@ -14,14 +14,12 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Keep your original API URL exactly as it was
-  const API_URL = 'https://msp-sap-api2-h5dmf6e6d4fngcbf.germanywestcentral-01.azurewebsites.net';
-
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const response = await fetch(`${API_URL}/api/data`);
+        // Use relative URL - Azure Static Web Apps automatically routes /api/* to your API
+        const response = await fetch('/api/data');
         
         if (!response.ok) {
           throw new Error(`API request failed with status ${response.status}`);
@@ -50,12 +48,11 @@ function App() {
         <div className="error">Error: {error}</div>
       ) : (
         <>
-          {/* Clean Dashboard component - no redundant bottom components */}
           <Dashboard 
             stats={apiData.transaction_stats} 
             budgetData={apiData.budget_allocation} 
             awaitingAssignment={apiData.awaiting_assignment}
-            apiUrl={API_URL}
+            apiUrl=""  // Pass empty string or remove this prop
           />
         </>
       )}
