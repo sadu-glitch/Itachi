@@ -66,42 +66,122 @@ def home():
 def get_data():
     """Retrieve all processed data for the frontend from database"""
     try:
+        logger.info("🔍 Starting /api/data request...")
+        
         # Read all the processed data from database
         try:
             transactions = get_processed_data_from_database("transactions")
+            logger.info(f"✅ Loaded transactions: {type(transactions)}")
         except Exception as e:
+            logger.error(f"❌ Failed to load transactions: {str(e)}")
             transactions = {"error": str(e), "message": "Could not read transactions data"}
             
         try:
-            departments = get_processed_data_from_database("frontend_departments")
+            departments_data = get_processed_data_from_database("frontend_departments")
+            logger.info(f"🔍 Raw departments_data: {type(departments_data)}")
+            logger.info(f"🔍 Departments_data keys: {list(departments_data.keys()) if isinstance(departments_data, dict) else 'Not a dict'}")
+            
+            # ✅ ENHANCED FIX: Handle all possible data formats
+            departments = []
+            if isinstance(departments_data, dict):
+                if 'departments' in departments_data:
+                    deps = departments_data['departments']
+                    if isinstance(deps, str):
+                        # Parse JSON string
+                        try:
+                            departments = json.loads(deps)
+                            logger.info(f"✅ Parsed departments from JSON string: {len(departments)} items")
+                        except json.JSONDecodeError as e:
+                            logger.error(f"❌ Failed to parse departments JSON: {str(e)}")
+                            departments = []
+                    elif isinstance(deps, list):
+                        departments = deps
+                        logger.info(f"✅ Used departments list directly: {len(departments)} items")
+                    else:
+                        logger.warning(f"⚠️ Unexpected departments type: {type(deps)}")
+                        departments = []
+                else:
+                    logger.warning("⚠️ No 'departments' key in departments_data")
+                    departments = []
+            else:
+                logger.warning(f"⚠️ departments_data is not a dict: {type(departments_data)}")
+                departments = []
+                
+            logger.info(f"🎯 Final departments: {len(departments)} items")
+            
         except Exception as e:
-            departments = {"error": str(e), "message": "Could not read departments data"}
+            logger.error(f"❌ Failed to load departments: {str(e)}")
+            departments = []  # Empty array as fallback
         
         try:
-            regions = get_processed_data_from_database("frontend_regions")
+            regions_data = get_processed_data_from_database("frontend_regions")
+            logger.info(f"🔍 Raw regions_data: {type(regions_data)}")
+            
+            # ✅ ENHANCED FIX: Handle all possible data formats
+            regions = []
+            if isinstance(regions_data, dict):
+                if 'regions' in regions_data:
+                    regs = regions_data['regions']
+                    if isinstance(regs, str):
+                        # Parse JSON string
+                        try:
+                            regions = json.loads(regs)
+                            logger.info(f"✅ Parsed regions from JSON string: {len(regions)} items")
+                        except json.JSONDecodeError as e:
+                            logger.error(f"❌ Failed to parse regions JSON: {str(e)}")
+                            regions = []
+                    elif isinstance(regs, list):
+                        regions = regs
+                        logger.info(f"✅ Used regions list directly: {len(regions)} items")
+                    else:
+                        logger.warning(f"⚠️ Unexpected regions type: {type(regs)}")
+                        regions = []
+                else:
+                    logger.warning("⚠️ No 'regions' key in regions_data")
+                    regions = []
+            else:
+                logger.warning(f"⚠️ regions_data is not a dict: {type(regions_data)}")
+                regions = []
+                
+            logger.info(f"🎯 Final regions: {len(regions)} items")
+            
         except Exception as e:
-            regions = {"error": str(e), "message": "Could not read regions data"}
+            logger.error(f"❌ Failed to load regions: {str(e)}")
+            regions = []  # Empty array as fallback
         
         try:
             awaiting = get_processed_data_from_database("frontend_awaiting_assignment")
+            logger.info(f"✅ Loaded awaiting assignment: {type(awaiting)}")
         except Exception as e:
-            awaiting = {"error": str(e), "message": "Could not read awaiting assignment data"}
+            logger.error(f"❌ Failed to load awaiting assignment: {str(e)}")
+            awaiting = {}  # Empty dict as fallback
         
         try:
             budgets = get_processed_data_from_database("budget_allocation")
+            logger.info(f"✅ Loaded budget allocation: {type(budgets)}")
         except Exception as e:
-            budgets = {"error": str(e), "message": "Could not read budget allocation data"}
+            logger.error(f"❌ Failed to load budget allocation: {str(e)}")
+            budgets = {}  # Empty dict as fallback
         
-        # Return everything in one response
-        return jsonify({
-            "departments": departments,
-            "regions": regions,
+        # ✅ FINAL RESPONSE: Return the corrected data structure
+        response_data = {
+            "departments": departments,  # ← Now this is guaranteed to be an array!
+            "regions": regions,          # ← Now this is guaranteed to be an array!
             "awaiting_assignment": awaiting,
             "budget_allocation": budgets,
-            "transaction_stats": transactions.get('statistics', {})
-        })
+            "transaction_stats": transactions.get('statistics', {}) if isinstance(transactions, dict) else {}
+        }
+        
+        logger.info(f"🎯 FINAL RESPONSE SUMMARY:")
+        logger.info(f"  - departments: {len(departments)} items (type: {type(departments)})")
+        logger.info(f"  - regions: {len(regions)} items (type: {type(regions)})")
+        logger.info(f"  - awaiting_assignment: {type(awaiting)}")
+        logger.info(f"  - budget_allocation: {type(budgets)}")
+        
+        return jsonify(response_data)
+        
     except Exception as e:
-        logger.error(f"Error getting data: {str(e)}")
+        logger.error(f"❌ Critical error in /api/data: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/transactions', methods=['GET'])
