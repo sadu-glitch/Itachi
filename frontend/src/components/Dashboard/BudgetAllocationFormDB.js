@@ -4,7 +4,10 @@ import React, { useState, useEffect, useCallback } from 'react';
  * Enhanced component for budget allocation with regional distribution and audit trail
  * Database-integrated version (replaces blob storage hooks with direct API calls)
  */
-const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
+const BudgetAllocationForm = ({ departments = [], baseApiUrl, onSuccess }) => {
+  // Add safety check for departments prop
+  const safeDepartments = Array.isArray(departments) ? departments : [];
+  
   const [selectedDepartment, setSelectedDepartment] = useState(null);
   const [departmentBudget, setDepartmentBudget] = useState(0);
   const [regionalBudgets, setRegionalBudgets] = useState({});
@@ -23,6 +26,16 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
   // Database-integrated budget state
   const [budgetData, setBudgetData] = useState({ departments: {}, regions: {} });
   const [budgetDataLoading, setBudgetDataLoading] = useState(false);
+
+  // Add debug logging for departments prop
+  useEffect(() => {
+    console.log('🔍 Departments prop received:', {
+      departments: departments,
+      isArray: Array.isArray(departments),
+      length: Array.isArray(departments) ? departments.length : 'N/A',
+      type: typeof departments
+    });
+  }, [departments]);
 
   // ✅ DATABASE INTEGRATION: Direct API calls instead of hooks
   
@@ -242,7 +255,7 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
   // Handle department selection
   const handleDepartmentChange = async (e) => {
     const deptName = e.target.value;
-    const dept = departments.find(d => d.name === deptName);
+    const dept = safeDepartments.find(d => d.name === deptName);
     
     console.log('🏢 Department changed to:', deptName, 'Department object:', dept);
     
@@ -315,6 +328,30 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
   const clearAllocations = () => {
     setRegionalBudgets({});
   };
+
+  // Early return if departments is not available
+  if (!Array.isArray(departments)) {
+    return (
+      <div className="budget-summary">
+        <h3>Budget Allocation</h3>
+        <div style={{
+          padding: '20px',
+          backgroundColor: '#fff3cd',
+          border: '1px solid #ffeaa7',
+          borderRadius: '4px',
+          margin: '20px 0'
+        }}>
+          <div style={{ color: '#856404' }}>
+            ⚠️ Departments data is not available or not in the correct format.
+          </div>
+          <div style={{ fontSize: '12px', color: '#666', marginTop: '8px' }}>
+            Expected: Array of department objects<br/>
+            Received: {typeof departments} - {JSON.stringify(departments)}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ✅ DATABASE INTEGRATION: Handle budget submission with direct API call
   const handleBudgetSubmit = async (e) => {
@@ -479,6 +516,23 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
     <div className="budget-summary">
       <h3>Budget Allocation</h3>
       
+      {/* Debug Information */}
+      <div style={{ 
+        padding: '10px', 
+        backgroundColor: '#f0f0f0', 
+        marginBottom: '15px',
+        fontSize: '12px',
+        borderRadius: '4px'
+      }}>
+        <div><strong>🔍 Debug Info:</strong></div>
+        <div>Departments available: {safeDepartments.length}</div>
+        <div>Departments type: {typeof departments}</div>
+        <div>Is departments array: {Array.isArray(departments) ? 'Yes' : 'No'}</div>
+        {safeDepartments.length > 0 && (
+          <div>Sample department: {JSON.stringify(safeDepartments[0])}</div>
+        )}
+      </div>
+      
       {/* User Information Section */}
       <div style={{ 
         marginBottom: '20px', 
@@ -613,10 +667,10 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
             <option value="">Select Department</option>
             
             {/* HQ Departments Section */}
-            {departments.filter(dept => dept.location_type === 'HQ').length > 0 && (
+            {safeDepartments.filter(dept => dept.location_type === 'HQ').length > 0 && (
               <>
                 <optgroup label="🏢 HQ Departments">
-                  {departments
+                  {safeDepartments
                     .filter(dept => dept.location_type === 'HQ')
                     .sort((a, b) => a.name.localeCompare(b.name))
                     .map(dept => (
@@ -630,10 +684,10 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
             )}
             
             {/* Floor Departments Section */}
-            {departments.filter(dept => dept.location_type === 'Floor').length > 0 && (
+            {safeDepartments.filter(dept => dept.location_type === 'Floor').length > 0 && (
               <>
                 <optgroup label="🏭 Floor Departments">
-                  {departments
+                  {safeDepartments
                     .filter(dept => dept.location_type === 'Floor')
                     .sort((a, b) => a.name.localeCompare(b.name))
                     .map(dept => (
@@ -647,10 +701,10 @@ const BudgetAllocationForm = ({ departments, baseApiUrl, onSuccess }) => {
             )}
             
             {/* Other/Unknown Departments Section */}
-            {departments.filter(dept => dept.location_type !== 'HQ' && dept.location_type !== 'Floor').length > 0 && (
+            {safeDepartments.filter(dept => dept.location_type !== 'HQ' && dept.location_type !== 'Floor').length > 0 && (
               <>
                 <optgroup label="❓ Other Departments">
-                  {departments
+                  {safeDepartments
                     .filter(dept => dept.location_type !== 'HQ' && dept.location_type !== 'Floor')
                     .sort((a, b) => a.name.localeCompare(b.name))
                     .map(dept => (
