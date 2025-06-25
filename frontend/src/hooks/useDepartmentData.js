@@ -16,31 +16,59 @@ export const useDepartmentData = (baseApiUrl) => {
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch(`${baseApiUrl}/api/data`);
+      
+      // Remove trailing slash if present
+      const normalizedApiUrl = baseApiUrl.endsWith('/') 
+        ? baseApiUrl.slice(0, -1) 
+        : baseApiUrl;
+        
+      const response = await fetch(`${normalizedApiUrl}/api/data`);
       
       if (!response.ok) {
-        throw new Error('Network response was not ok');
+        throw new Error(`Network response was not ok: ${response.status}`);
       }
       
       const data = await response.json();
       
-      // Store the full data structure
-      setDepartmentsData(data.departments || { departments: [] });
-      setRegionsData(data.regions || { regions: [] });
+      // ✅ FIX: Store the data correctly without double-wrapping
+      console.log('🔍 API Response Structure:', {
+        fullData: data,
+        departments: data.departments,
+        departmentsIsArray: Array.isArray(data.departments),
+        regions: data.regions,
+        regionsIsArray: Array.isArray(data.regions)
+      });
+      
+      // ✅ FIXED: Directly store the data structure as received from API
+      setDepartmentsData({
+        departments: Array.isArray(data.departments) ? data.departments : []
+      });
+      
+      setRegionsData({
+        regions: Array.isArray(data.regions) ? data.regions : []
+      });
       
       setLoading(false);
       return data;
     } catch (err) {
+      console.error('❌ useDepartmentData fetch error:', err);
       setError(err.message);
       setLoading(false);
+      
+      // ✅ FIX: Ensure we always have valid array structure even on error
+      setDepartmentsData({ departments: [] });
+      setRegionsData({ regions: [] });
+      
       throw err;
     }
   }, [baseApiUrl]); // Add baseApiUrl as a dependency of fetchDepartmentData
   
   // Fetch data when the component mounts or when fetchDepartmentData changes
   useEffect(() => {
-    fetchDepartmentData();
-  }, [fetchDepartmentData]);
+    if (baseApiUrl) {
+      fetchDepartmentData();
+    }
+  }, [fetchDepartmentData, baseApiUrl]);
   
   return {
     departmentsData,
