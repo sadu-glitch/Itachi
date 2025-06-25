@@ -9,6 +9,7 @@ import tempfile
 from datetime import datetime
 import logging
 from urllib.parse import unquote
+import ast
 
 # Database-integrated importssss
 try:
@@ -51,18 +52,13 @@ def get_db_manager():
         db_manager = DatabaseManager()
     return db_manager
 
-def safe_parse_json_fields(data):
-    """Helper to parse JSON string fields in transaction data"""
-    if isinstance(data, dict):
-        for key in ['transactions', 'parked_measures', 'direct_costs', 'booked_measures']:
-            if key in data and isinstance(data[key], str):
-                try:
-                    data[key] = json.loads(data[key])
-                    logger.info(f"✅ Parsed {key} from JSON string")
-                except json.JSONDecodeError as e:
-                    logger.error(f"❌ Failed to parse {key}: {str(e)}")
-                    data[key] = []
-    return data
+def parse_python_string_to_list(python_string):
+    """Helper function to safely parse Python string representations to lists"""
+    try:
+        return ast.literal_eval(python_string)
+    except (ValueError, SyntaxError) as e:
+        logger.error(f"Failed to parse Python string: {str(e)}")
+        return []
 
 
 @app.route('/')
@@ -82,26 +78,6 @@ def get_data():
     try:
         logger.info("🔍 Starting /api/data request...")
         
-        # Helper function to safely parse JSON strings
-        def safe_parse_json(data, field_name):
-            if isinstance(data, dict) and field_name in data:
-                field_data = data[field_name]
-                if isinstance(field_data, str):
-                    try:
-                        # Parse the JSON string
-                        parsed = json.loads(field_data)
-                        logger.info(f"✅ Parsed {field_name} from JSON string: {len(parsed) if isinstance(parsed, list) else type(parsed)}")
-                        return parsed
-                    except json.JSONDecodeError as e:
-                        logger.error(f"❌ Failed to parse {field_name} JSON: {str(e)}")
-                        return [] if 'departments' in field_name or 'regions' in field_name else {}
-                else:
-                    logger.info(f"✅ Using {field_name} directly: {type(field_data)}")
-                    return field_data
-            else:
-                logger.warning(f"⚠️ No '{field_name}' field found in data")
-                return [] if 'departments' in field_name or 'regions' in field_name else {}
-        
         # Read all the processed data from database
         try:
             transactions = get_processed_data_from_database("transactions")
@@ -112,14 +88,17 @@ def get_data():
             
         try:
             departments_data = get_processed_data_from_database("frontend_departments")
-            logger.info(f"🔍 Raw departments_data type: {type(departments_data)}")
+            logger.info(f"🔍 Raw departments_data: {departments_data}")
             
-            # Parse departments with bulletproof logic
-            departments = safe_parse_json(departments_data, 'departments')
-            
-            # Additional safety check
-            if not isinstance(departments, list):
-                logger.warning(f"⚠️ Departments is not a list: {type(departments)}")
+            # ✅ FIXED: Use enhanced parsing with Python string support
+            if departments_data and 'departments' in departments_data:
+                dept_string = departments_data['departments']
+                if isinstance(dept_string, str):
+                    departments = parse_python_string_to_list(dept_string)
+                    logger.info(f"✅ Parsed departments from Python string: {len(departments)} items")
+                else:
+                    departments = dept_string if isinstance(dept_string, list) else []
+            else:
                 departments = []
                 
         except Exception as e:
@@ -128,14 +107,17 @@ def get_data():
         
         try:
             regions_data = get_processed_data_from_database("frontend_regions")
-            logger.info(f"🔍 Raw regions_data type: {type(regions_data)}")
+            logger.info(f"🔍 Raw regions_data: {regions_data}")
             
-            # Parse regions with bulletproof logic
-            regions = safe_parse_json(regions_data, 'regions')
-            
-            # Additional safety check
-            if not isinstance(regions, list):
-                logger.warning(f"⚠️ Regions is not a list: {type(regions)}")
+            # ✅ FIXED: Use enhanced parsing with Python string support
+            if regions_data and 'regions' in regions_data:
+                regions_string = regions_data['regions']
+                if isinstance(regions_string, str):
+                    regions = parse_python_string_to_list(regions_string)
+                    logger.info(f"✅ Parsed regions from Python string: {len(regions)} items")
+                else:
+                    regions = regions_string if isinstance(regions_string, list) else []
+            else:
                 regions = []
                 
         except Exception as e:
@@ -146,15 +128,12 @@ def get_data():
             awaiting = get_processed_data_from_database("frontend_awaiting_assignment")
             logger.info(f"✅ Loaded awaiting assignment: {type(awaiting)}")
             
-            # CRITICAL FIX: Parse awaiting assignment strings too
+            # Parse awaiting assignment strings too
             if isinstance(awaiting, dict):
                 for dept_name, measures in awaiting.items():
                     if isinstance(measures, str):
                         try:
-                            # Parse the string representation of Python list
-                            # Replace single quotes with double quotes for JSON parsing
-                            json_string = measures.replace("'", '"')
-                            awaiting[dept_name] = json.loads(json_string)
+                            awaiting[dept_name] = parse_python_string_to_list(measures)
                             logger.info(f"✅ Parsed awaiting measures for {dept_name}")
                         except Exception as parse_error:
                             logger.error(f"❌ Failed to parse awaiting measures for {dept_name}: {str(parse_error)}")
@@ -193,8 +172,6 @@ def get_data():
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"status": "error", "message": str(e)}), 500
-    
-# Add this debug endpoint to your Flask app to see what's in your database
 
 @app.route('/api/debug-data', methods=['GET'])
 def debug_data():
