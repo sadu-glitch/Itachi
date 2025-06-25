@@ -39,46 +39,83 @@ export const useDepartmentData = (baseApiUrl) => {
         regionsIsArray: Array.isArray(data.regions)
       });
       
-      // ✅ FIXED: Handle object structure from your API
-      // Your API returns departments as an object, not array
+      // ✅ FIXED: Handle string-encoded JSON from your API
       const extractDepartments = (deptData) => {
+        // If it's already an array, return it
         if (Array.isArray(deptData)) {
           return deptData;
         }
+        
+        // If it's a string, try to parse it as JSON
+        if (typeof deptData === 'string') {
+          try {
+            // Replace single quotes with double quotes for valid JSON
+            const jsonString = deptData.replace(/'/g, '"');
+            const parsed = JSON.parse(jsonString);
+            if (Array.isArray(parsed)) {
+              return parsed;
+            }
+          } catch (parseError) {
+            console.error('❌ Failed to parse departments string:', parseError);
+          }
+        }
+        
+        // If it's an object, try various extraction methods
         if (deptData && typeof deptData === 'object') {
-          // If it's an object with a departments key
           if (deptData.departments && Array.isArray(deptData.departments)) {
             return deptData.departments;
           }
-          // If it's an object where values are the departments
           const values = Object.values(deptData);
           if (values.length > 0 && typeof values[0] === 'object' && values[0].name) {
             return values;
           }
         }
+        
         return [];
       };
 
       const extractRegions = (regData) => {
+        // If it's already an array, return it
         if (Array.isArray(regData)) {
           return regData;
         }
+        
+        // If it's a string, try to parse it as JSON
+        if (typeof regData === 'string') {
+          try {
+            // Replace single quotes with double quotes for valid JSON
+            const jsonString = regData.replace(/'/g, '"');
+            const parsed = JSON.parse(jsonString);
+            if (Array.isArray(parsed)) {
+              return parsed;
+            }
+          } catch (parseError) {
+            console.error('❌ Failed to parse regions string:', parseError);
+          }
+        }
+        
+        // If it's an object, try various extraction methods
         if (regData && typeof regData === 'object') {
-          // If it's an object with a regions key
           if (regData.regions && Array.isArray(regData.regions)) {
             return regData.regions;
           }
-          // If it's an object where values are the regions
           const values = Object.values(regData);
           if (values.length > 0 && typeof values[0] === 'object' && values[0].name) {
             return values;
           }
         }
+        
         return [];
       };
 
       const departmentsArray = extractDepartments(data.departments);
       const regionsArray = extractRegions(data.regions);
+
+      console.log('✅ Successfully extracted:', {
+        departmentsCount: departmentsArray.length,
+        regionsCount: regionsArray.length,
+        sampleDepartment: departmentsArray[0]
+      });
 
       setDepartmentsData({
         departments: departmentsArray
