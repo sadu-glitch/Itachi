@@ -17,23 +17,35 @@ function App() {
   useEffect(() => {
     const fetchData = async () => {
       try {
+        console.log('🚀 Starting API call...');
         setLoading(true);
-        const response = await fetch('/api/data');
         
-        // Add this debug line to see what we're actually getting
+        const response = await fetch('/api/data');
+        console.log('📡 Response received:', response);
+        console.log('📊 Response status:', response.status);
+        console.log('📋 Response ok:', response.ok);
+        
+        // Get the raw text response
         const textResponse = await response.text();
-        console.log('Raw response:', textResponse);
+        console.log('📝 Raw response (first 500 chars):', textResponse.substring(0, 500));
+        console.log('📝 Raw response type:', typeof textResponse);
         
         if (!response.ok) {
+          console.log('❌ Response not OK, status:', response.status);
           throw new Error(`API request failed with status ${response.status}`);
         }
         
         // Try to parse as JSON
+        console.log('🔄 Attempting to parse JSON...');
         const data = JSON.parse(textResponse);
+        console.log('✅ Parsed JSON successfully:', data);
         setApiData(data);
         setLoading(false);
       } catch (err) {
-        console.error('Error fetching data:', err);
+        console.error('❌ Error details:', err);
+        console.error('❌ Error type:', typeof err);
+        console.error('❌ Error message:', err.message);
+        console.error('❌ Full error:', err);
         setError(err.message);
         setLoading(false);
       }
