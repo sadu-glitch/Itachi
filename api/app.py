@@ -907,6 +907,235 @@ def get_budget_history():
     except Exception as e:
         logger.error(f"Error getting budget history: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
+    
+@app.route('/api/deep-debug', methods=['GET'])
+def deep_debug():
+    """Comprehensive debugging endpoint to understand data flow issues"""
+    try:
+        debug_results = {}
+        
+        # 1. Test database connection
+        try:
+            db_mgr = get_db_manager()
+            connection_ok = db_mgr.test_connection()
+            debug_results['database_connection'] = {
+                'status': 'connected' if connection_ok else 'failed',
+                'server': DB_SERVER,
+                'database': DB_NAME
+            }
+        except Exception as e:
+            debug_results['database_connection'] = {
+                'status': 'error',
+                'error': str(e)
+            }
+        
+        # 2. Check raw database data
+        try:
+            # Get the raw transactions data from database
+            raw_data = get_processed_data_from_database("transactions")
+            
+            debug_results['raw_database_data'] = {
+                'type': type(raw_data).__name__,
+                'is_dict': isinstance(raw_data, dict),
+                'keys': list(raw_data.keys()) if isinstance(raw_data, dict) else 'Not a dict',
+                'size_estimate': len(str(raw_data))
+            }
+            
+            # If it's a dict, check the transactions key specifically
+            if isinstance(raw_data, dict):
+                transactions_raw = raw_data.get('transactions', None)
+                debug_results['transactions_raw'] = {
+                    'exists': 'transactions' in raw_data,
+                    'type': type(transactions_raw).__name__,
+                    'is_list': isinstance(transactions_raw, list),
+                    'is_string': isinstance(transactions_raw, str),
+                    'count': len(transactions_raw) if isinstance(transactions_raw, (list, str)) else 0
+                }
+                
+                # If it's a string, try to show a sample
+                if isinstance(transactions_raw, str):
+                    debug_results['transactions_raw']['sample'] = transactions_raw[:200] + '...' if len(transactions_raw) > 200 else transactions_raw
+                
+                # Check other keys
+                for key in ['parked_measures', 'direct_costs', 'booked_measures', 'statistics']:
+                    if key in raw_data:
+                        value = raw_data[key]
+                        debug_results[f'{key}_raw'] = {
+                            'type': type(value).__name__,
+                            'count': len(value) if isinstance(value, (list, str, dict)) else 0
+                        }
+            
+        except Exception as e:
+            debug_results['raw_database_data'] = {
+                'error': str(e),
+                'error_type': type(e).__name__
+            }
+        
+        # 3. Test the parsing function
+        try:
+            raw_data = get_processed_data_from_database("transactions")
+            parsed_data = safe_parse_json_fields(raw_data)
+            
+            debug_results['parsing_test'] = {
+                'raw_type': type(raw_data).__name__,
+                'parsed_type': type(parsed_data).__name__,
+                'parsing_changed_data': str(raw_data) != str(parsed_data)
+            }
+            
+            if isinstance(parsed_data, dict):
+                transactions_parsed = parsed_data.get('transactions', [])
+                debug_results['transactions_parsed'] = {
+                    'type': type(transactions_parsed).__name__,
+                    'count': len(transactions_parsed) if isinstance(transactions_parsed, list) else 0,
+                    'first_item_type': type(transactions_parsed[0]).__name__ if isinstance(transactions_parsed, list) and len(transactions_parsed) > 0 else 'N/A'
+                }
+                
+                # Sample transaction analysis
+                if isinstance(transactions_parsed, list) and len(transactions_parsed) > 0:
+                    sample_tx = transactions_parsed[0]
+                    debug_results['sample_transaction'] = {
+                        'keys': list(sample_tx.keys()) if isinstance(sample_tx, dict) else 'Not a dict',
+                        'category': sample_tx.get('category', 'NO_CATEGORY') if isinstance(sample_tx, dict) else 'N/A',
+                        'budget_impact': sample_tx.get('budget_impact', 'NO_IMPACT') if isinstance(sample_tx, dict) else 'N/A',
+                        'department': sample_tx.get('department', 'NO_DEPARTMENT') if isinstance(sample_tx, dict) else 'N/A'
+                    }
+                    
+                    # Category breakdown
+                    category_counts = {}
+                    budget_impact_counts = {}
+                    
+                    for tx in transactions_parsed:
+                        if isinstance(tx, dict):
+                            cat = tx.get('category', 'NO_CATEGORY')
+                            category_counts[cat] = category_counts.get(cat, 0) + 1
+                            
+                            impact = tx.get('budget_impact', 'NO_IMPACT')
+                            budget_impact_counts[impact] = budget_impact_counts.get(impact, 0) + 1
+                    
+                    debug_results['transaction_analysis'] = {
+                        'category_breakdown': category_counts,
+                        'budget_impact_breakdown': budget_impact_counts,
+                        'total_analyzed': len(transactions_parsed)
+                    }
+            
+        except Exception as e:
+            debug_results['parsing_test'] = {
+                'error': str(e),
+                'error_type': type(e).__name__
+            }
+        
+        # 4. Test source data availability
+        try:
+            db_mgr = get_db_manager()
+            
+            source_data_status = {}
+            
+            # Check each source table
+            tables_to_check = [
+                ('sap_transactions', 'BULK_IMPORT_%'),
+                ('msp_measures', 'MSP_%'),
+                ('kostenstelle_mapping_floor', 'BULK_IMPORT_%'),
+                ('kostenstelle_mapping_hq', 'HQ_FIX_%')
+            ]
+            
+            for table_name, pattern in tables_to_check:
+                try:
+                    latest_batch = db_mgr.get_latest_batch_id(table_name, pattern)
+                    
+                    # Count records in latest batch
+                    if latest_batch:
+                        query = text(f"SELECT COUNT(*) FROM {table_name} WHERE batch_id = :batch_id")
+                        with db_mgr.engine.connect() as conn:
+                            count = conn.execute(query, {"batch_id": latest_batch}).scalar()
+                    else:
+                        count = 0
+                    
+                    source_data_status[table_name] = {
+                        'latest_batch': latest_batch,
+                        'record_count': count,
+                        'has_data': count > 0
+                    }
+                    
+                except Exception as table_error:
+                    source_data_status[table_name] = {
+                        'error': str(table_error)
+                    }
+            
+            debug_results['source_data_status'] = source_data_status
+            
+        except Exception as e:
+            debug_results['source_data_status'] = {
+                'error': str(e)
+            }
+        
+        # 5. Test manual Bestellnummer extraction
+        try:
+            import re
+            
+            # Get a few sample SAP transactions
+            query = text("""
+                SELECT TOP 5 text_field 
+                FROM sap_transactions 
+                ORDER BY upload_date DESC
+            """)
+            
+            with db_mgr.engine.connect() as conn:
+                results = conn.execute(query).fetchall()
+            
+            bestellnummer_test = []
+            for row in results:
+                text_field = str(row[0])
+                matches = re.findall(r'\b\d{4}\b', text_field)
+                valid_numbers = [int(num) for num in matches if int(num) >= 3000]
+                
+                bestellnummer_test.append({
+                    'text_field': text_field[:100],  # First 100 chars
+                    'matches_found': matches,
+                    'valid_bestellnummer': valid_numbers[0] if valid_numbers else None
+                })
+            
+            debug_results['bestellnummer_extraction_test'] = {
+                'samples_tested': len(bestellnummer_test),
+                'samples': bestellnummer_test,
+                'valid_extractions': len([t for t in bestellnummer_test if t['valid_bestellnummer']])
+            }
+            
+        except Exception as e:
+            debug_results['bestellnummer_extraction_test'] = {
+                'error': str(e)
+            }
+        
+        # 6. Final recommendations
+        recommendations = []
+        
+        if debug_results.get('raw_database_data', {}).get('keys') == 'Not a dict':
+            recommendations.append("❌ Raw database data is not a dictionary - check data storage format")
+        
+        if debug_results.get('transactions_raw', {}).get('is_string'):
+            recommendations.append("⚠️ Transactions stored as string - parsing may be needed")
+        
+        if debug_results.get('transaction_analysis', {}).get('category_breakdown', {}).get('DIRECT_COST', 0) == debug_results.get('transaction_analysis', {}).get('total_analyzed', 0):
+            recommendations.append("❌ All transactions are DIRECT_COST - Bestellnummer matching not working")
+        
+        if not any(debug_results.get('source_data_status', {}).get(table, {}).get('has_data', False) for table in ['sap_transactions', 'msp_measures']):
+            recommendations.append("❌ No source data found - run data import first")
+        
+        if debug_results.get('bestellnummer_extraction_test', {}).get('valid_extractions', 0) == 0:
+            recommendations.append("❌ Bestellnummer extraction failing - check text field format")
+        
+        debug_results['recommendations'] = recommendations
+        debug_results['timestamp'] = datetime.now().isoformat()
+        
+        return jsonify(debug_results)
+        
+    except Exception as e:
+        logger.error(f"Deep debug error: {str(e)}")
+        import traceback
+        return jsonify({
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "timestamp": datetime.now().isoformat()
+        }), 500
 
 @app.route('/api/budget-backups', methods=['GET'])
 def get_budget_backups():
