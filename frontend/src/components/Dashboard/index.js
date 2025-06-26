@@ -10,7 +10,6 @@ import { useBudgetProgress } from '../../hooks/useBudget';
 import EnhancedExcelExportButton from './EnhancedExcelExportButton';
 import '../../styles/excel-export.css';
 
-// Main Dashboard component that orchestrates the overall structure
 const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
   // State for navigation and selection
   const [selectedDepartment, setSelectedDepartment] = useState(null);
@@ -19,7 +18,6 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [error, setError] = useState(null);
   
-  // Get the base API URL - use provided apiUrl or fall back to localhost for development
   const baseApiUrl = apiUrl || 'https://msp-sap-api2-h5dmf6e6d4fngcbf.germanywestcentral-01.azurewebsites.net';
   
   // Use custom hooks for data fetching
@@ -31,58 +29,15 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
     refreshDepartmentData
   } = useDepartmentData(baseApiUrl);
   
-  // Fetch all transactions for Excel export
-  const [allTransactions, setAllTransactions] = useState([]);
+  // ✅ FIX 1: Fetch ALL transactions first, then filter locally
+  const [allTransactionsData, setAllTransactionsData] = useState(null);
   const [loadingAllTransactions, setLoadingAllTransactions] = useState(false);
-  
-  // Fetch transactions when department or region changes
-  const {
-    transactions,
-    error: transactionsError,
-    fetchTransactions
-  } = useTransactionData(baseApiUrl, selectedDepartment, selectedRegion);
 
-  // ✅ ENHANCED DEBUG - expand the transactions object
-console.log('🔍 useTransactionData Hook Response:', {
-  transactions,
-  transactionsType: typeof transactions,
-  hasTransactionsProperty: 'transactions' in (transactions || {}),
-  transactionsKeys: transactions ? Object.keys(transactions) : 'null',
-  // ✅ ADD THESE LINES TO SEE THE ACTUAL DATA
-  transactionsTransactions: transactions?.transactions,
-  transactionsTransactionsLength: transactions?.transactions?.length,
-  transactionsParkedMeasures: transactions?.parked_measures,
-  transactionsParkedMeasuresLength: transactions?.parked_measures?.length,
-  selectedDepartment,
-  selectedRegion,
-  error: transactionsError
-});
-  
-  // ✅ DEBUG: Add comprehensive debugging for departments data
-  useEffect(() => {
-    console.log('🔍 FULL API RESPONSE DEBUG:', {
-      departmentsData: departmentsData,
-      departmentsDataType: typeof departmentsData,
-      departments: departmentsData?.departments,
-      departmentsIsArray: Array.isArray(departmentsData?.departments),
-      departmentsLength: departmentsData?.departments?.length,
-      sample: departmentsData?.departments?.[0],
-      fullStructure: JSON.stringify(departmentsData, null, 2)
-    });
-  }, [departmentsData]);
-  
-  // Set error from any source
-  useEffect(() => {
-    if (departmentsError) setError(departmentsError);
-    if (transactionsError) setError(transactionsError);
-  }, [departmentsError, transactionsError]);
-  
-  // Fetch all transactions for Excel export when component mounts
+  // ✅ FIX 2: Fetch all transactions when component mounts
   useEffect(() => {
     const fetchAllTransactions = async () => {
       try {
         setLoadingAllTransactions(true);
-        // Remove trailing slash from baseApiUrl if it exists
         const normalizedApiUrl = baseApiUrl.endsWith('/') 
           ? baseApiUrl.slice(0, -1) 
           : baseApiUrl;
@@ -94,31 +49,92 @@ console.log('🔍 useTransactionData Hook Response:', {
         }
         
         const data = await response.json();
-        setAllTransactions(data.transactions || []);
+        console.log('🔍 Dashboard: All transactions fetched:', {
+          transactions: data.transactions?.length || 0,
+          parked_measures: data.parked_measures?.length || 0,
+          structure: Object.keys(data)
+        });
+        
+        setAllTransactionsData(data);
         setLoadingAllTransactions(false);
       } catch (err) {
-        console.error('Error fetching all transactions:', err);
+        console.error('❌ Dashboard: Error fetching all transactions:', err);
         setLoadingAllTransactions(false);
+        setError(err.message);
       }
     };
     
     fetchAllTransactions();
   }, [baseApiUrl]);
+
+  // ✅ FIX 3: Filter transactions locally based on selection
+  const getFilteredTransactions = () => {
+    if (!allTransactionsData?.transactions) {
+      console.log('🔍 Dashboard: No transaction data available');
+      return { transactions: [], parked_measures: [] };
+    }
+
+    let filteredTransactions = [...allTransactionsData.transactions];
+    let filteredParkedMeasures = [...(allTransactionsData.parked_measures || [])];
+
+    // Filter by department if selected
+    if (selectedDepartment) {
+      filteredTransactions = filteredTransactions.filter(tx => 
+        tx.department === selectedDepartment
+      );
+      filteredParkedMeasures = filteredParkedMeasures.filter(measure => 
+        measure.department === selectedDepartment
+      );
+      
+      console.log('🔍 Dashboard: Filtered by department:', {
+        department: selectedDepartment,
+        transactions: filteredTransactions.length,
+        parkedMeasures: filteredParkedMeasures.length
+      });
+    }
+
+    // Filter by region if selected
+    if (selectedRegion) {
+      filteredTransactions = filteredTransactions.filter(tx => 
+        tx.region === selectedRegion
+      );
+      // Note: parked measures might not have regions assigned yet
+      
+      console.log('🔍 Dashboard: Filtered by region:', {
+        region: selectedRegion,
+        transactions: filteredTransactions.length
+      });
+    }
+
+    return {
+      transactions: filteredTransactions,
+      parked_measures: filteredParkedMeasures,
+      // Include other arrays for compatibility
+      direct_costs: allTransactionsData.direct_costs || [],
+      booked_measures: allTransactionsData.booked_measures || [],
+      statistics: allTransactionsData.statistics || {}
+    };
+  };
+
+  // Set error from any source
+  useEffect(() => {
+    if (departmentsError) setError(departmentsError);
+  }, [departmentsError]);
   
   // Handle department selection
   const handleDepartmentClick = (department) => {
-    console.log('🔍 DEBUG: Department clicked:', department);
-    console.log('🔍 DEBUG: Department name:', department.name);
+    console.log('🔍 Dashboard: Department clicked:', department.name);
     setSelectedDepartment(department.name);
     setSelectedRegion(null);
     setSelectedRegionData(null);
     setSelectedTransaction(null);
   };
 
-  // Handle region selection - UPDATED to accept full region object
+  // Handle region selection
   const handleRegionClick = (region) => {
+    console.log('🔍 Dashboard: Region clicked:', region.name);
     setSelectedRegion(region.name);
-    setSelectedRegionData(region); // Store the full region data including budget info
+    setSelectedRegionData(region);
     setSelectedTransaction(null);
   };
 
@@ -130,15 +146,29 @@ console.log('🔍 useTransactionData Hook Response:', {
   // Handle assignment success (refresh data)
   const handleAssignmentSuccess = async () => {
     await refreshDepartmentData();
-    if (selectedDepartment) {
-      await fetchTransactions();
-    }
+    // ✅ FIX 4: Also refresh transaction data
+    const fetchAllTransactions = async () => {
+      try {
+        const normalizedApiUrl = baseApiUrl.endsWith('/') 
+          ? baseApiUrl.slice(0, -1) 
+          : baseApiUrl;
+          
+        const response = await fetch(`${normalizedApiUrl}/api/transactions`);
+        if (response.ok) {
+          const data = await response.json();
+          setAllTransactionsData(data);
+        }
+      } catch (err) {
+        console.error('Error refreshing transactions:', err);
+      }
+    };
+    await fetchAllTransactions();
   };
 
   // Handle back from region to department
   const handleBackToDepartment = () => {
     setSelectedRegion(null);
-    setSelectedRegionData(null); // Clear region data
+    setSelectedRegionData(null);
   };
   
   // If loading, show loading message
@@ -151,14 +181,13 @@ console.log('🔍 useTransactionData Hook Response:', {
     return <div className="error">Error: {error}</div>;
   }
 
-  // ✅ ENHANCED SAFETY: Ensure departments is always an array
+  // Ensure departments is always an array
   const safeDepartments = (() => {
     const deps = departmentsData?.departments;
     if (Array.isArray(deps)) {
       return deps;
     }
     if (deps && typeof deps === 'object') {
-      // If it's an object, try to extract values
       const values = Object.values(deps);
       if (Array.isArray(values)) {
         console.log('⚠️ Converting departments object to array:', values);
@@ -169,27 +198,32 @@ console.log('🔍 useTransactionData Hook Response:', {
     return [];
   })();
 
+  // ✅ FIX 5: Get properly filtered transaction data
+  const currentTransactionData = getFilteredTransactions();
+
   return (
     <div className="dashboard">
-      {/* Loading indicator for transactions */}
-      {loadingAllTransactions && <div className="loading">Loading all transactions...</div>}
+      {/* Loading indicator */}
+      {(loadingAllTransactions || departmentsLoading) && (
+        <div className="loading">Loading data...</div>
+      )}
       
       <div className="dashboard-header">
-        <h2 className="dashboard-title">Dashboard Overview mit Excel</h2>
+        <h2 className="dashboard-title">Dashboard Overview</h2>
         
-        {/* Excel Export Button - only show in main view */}
-        {!selectedDepartment && safeDepartments.length > 0 && regionsData.regions && allTransactions.length > 0 && (
+        {/* Excel Export Button */}
+        {!selectedDepartment && safeDepartments.length > 0 && regionsData.regions && allTransactionsData?.transactions?.length > 0 && (
           <EnhancedExcelExportButton
             departments={safeDepartments} 
             regions={regionsData.regions || []}
-            transactions={allTransactions}
+            transactions={allTransactionsData.transactions}
             baseApiUrl={baseApiUrl}
             useBudgetProgress={useBudgetProgress}
           />
         )}
       </div>
       
-      {/* ✅ DEBUG: Show current data state */}
+      {/* Debug Info */}
       <div style={{ 
         padding: '10px', 
         backgroundColor: '#f0f0f0', 
@@ -198,27 +232,23 @@ console.log('🔍 useTransactionData Hook Response:', {
         borderRadius: '4px'
       }}>
         <div><strong>🔍 Dashboard Debug Info:</strong></div>
-        <div>Safe Departments Count: {safeDepartments.length}</div>
-        <div>Raw Departments Type: {typeof departmentsData?.departments}</div>
-        <div>Raw Departments IsArray: {Array.isArray(departmentsData?.departments) ? 'Yes' : 'No'}</div>
-        <div>Loading: {departmentsLoading ? 'Yes' : 'No'}</div>
-        <div>Error: {error || 'None'}</div>
-        {safeDepartments.length > 0 && (
-          <div>Sample Department: {JSON.stringify(safeDepartments[0])}</div>
-        )}
+        <div>Departments: {safeDepartments.length}</div>
+        <div>All Transactions: {allTransactionsData?.transactions?.length || 0}</div>
+        <div>Current Filtered Transactions: {currentTransactionData.transactions.length}</div>
+        <div>Current Parked Measures: {currentTransactionData.parked_measures.length}</div>
+        <div>Selected Department: {selectedDepartment || 'None'}</div>
+        <div>Selected Region: {selectedRegion || 'None'}</div>
       </div>
       
       {/* Conditional rendering based on selection state */}
       {!selectedDepartment && (
         <>
-          {/* Budget Setting Form - only shown in main view */}
           <BudgetAllocationForm 
             departments={safeDepartments} 
             baseApiUrl={baseApiUrl} 
             onSuccess={refreshDepartmentData}
           />
           
-          {/* Department Overview */}
           <DepartmentOverview 
             departments={safeDepartments} 
             onDepartmentClick={handleDepartmentClick} 
@@ -228,51 +258,33 @@ console.log('🔍 useTransactionData Hook Response:', {
       )}
       
       {/* Department Detail View */}
-      {selectedDepartment && !selectedRegion && (() => {
-        // 🔍 DEBUG: Console logs go here, outside JSX
-        console.log('🔍 DEBUG: Selected Department:', selectedDepartment);
-        console.log('🔍 DEBUG: All Regions:', regionsData.regions);
-        console.log('🔍 DEBUG: Filtered Regions:', regionsData.regions?.filter(region => region.department === selectedDepartment));
-        
-        return (
-          <DepartmentDetail 
-            selectedDepartment={selectedDepartment}
-            regions={regionsData.regions?.filter(region => region.department === selectedDepartment) || []}
-            transactions={transactions.transactions || []}
-            parkedMeasures={(() => {
-              // Use transactions array instead of awaitingAssignment for complete data including msp_data
-              const allTransactions = transactions.transactions || [];
-              
-              // Filter parked measures that are awaiting assignment
-              const parkedMeasures = allTransactions.filter(tx => 
-                tx.department === selectedDepartment &&
-                tx.category === 'PARKED_MEASURE' &&
-                tx.status === 'Awaiting Assignment'
-              );
-              
-              console.log('🔍 DEBUG: Parked measures with msp_data:', parkedMeasures.length);
-              console.log('🔍 DEBUG: Sample parked measure msp_data:', parkedMeasures[0]?.msp_data);
-              
-              return parkedMeasures;
-            })()}
-            onRegionClick={handleRegionClick}
-            onTransactionClick={handleTransactionClick}
-            onBackClick={() => setSelectedDepartment(null)}
-            onAssignmentSuccess={handleAssignmentSuccess}
-            baseApiUrl={baseApiUrl}
-          />
-        );
-      })()}
+      {selectedDepartment && !selectedRegion && (
+        <DepartmentDetail 
+          selectedDepartment={selectedDepartment}
+          regions={regionsData.regions?.filter(region => region.department === selectedDepartment) || []}
+          transactions={currentTransactionData.transactions} // ✅ FIX 6: Pass filtered transactions
+          parkedMeasures={currentTransactionData.parked_measures.filter(measure => 
+            measure.department === selectedDepartment &&
+            (measure.category === 'UNASSIGNED_MEASURE' || 
+             (measure.category === 'PARKED_MEASURE' && measure.status === 'Awaiting Assignment'))
+          )}
+          onRegionClick={handleRegionClick}
+          onTransactionClick={handleTransactionClick}
+          onBackClick={() => setSelectedDepartment(null)}
+          onAssignmentSuccess={handleAssignmentSuccess}
+          baseApiUrl={baseApiUrl}
+        />
+      )}
       
-      {/* Region Detail View - UPDATED with regionBudgetData */}
+      {/* Region Detail View */}
       {selectedDepartment && selectedRegion && selectedRegionData && (
         <RegionDetail 
           selectedDepartment={selectedDepartment}
           selectedRegion={selectedRegion}
-          transactions={transactions.transactions?.filter(tx => tx.region === selectedRegion) || []}
-          regionBudgetData={selectedRegionData.budgetData || selectedRegionData.calculatedAmounts} // Pass budget data
+          transactions={currentTransactionData.transactions} // ✅ FIX 7: Pass filtered transactions
+          regionBudgetData={selectedRegionData.budgetData || selectedRegionData.calculatedAmounts}
           onTransactionClick={handleTransactionClick}
-          onBackClick={handleBackToDepartment} // Use updated handler
+          onBackClick={handleBackToDepartment}
           onAssignmentSuccess={handleAssignmentSuccess}
           baseApiUrl={baseApiUrl}
         />
