@@ -255,7 +255,7 @@ def get_transactions():
                 "message": str(e)
             }), 500
         
-        # Extract the specific arrays based on your processing code structure
+        # ✅ CRITICAL FIX: Extract arrays with proper parsing for ALL arrays
         all_transactions = transactions_data.get('transactions', [])
         parked_measures = transactions_data.get('parked_measures', [])
         direct_costs = transactions_data.get('direct_costs', [])
@@ -263,9 +263,33 @@ def get_transactions():
         outliers = transactions_data.get('outliers', [])
         placeholders = transactions_data.get('placeholders', [])
         statistics = transactions_data.get('statistics', {})
-        
-        # 🚨 CRITICAL FIX: If transactions array is empty but other arrays have data,
-        # combine them to build the complete transactions array
+
+        # ✅ STEP 1: Parse string representations if needed for ALL arrays
+        def ensure_list(data, array_name):
+            if isinstance(data, str):
+                try:
+                    parsed = parse_python_string_to_list(data)
+                    logger.info(f"✅ Parsed {array_name} from string: {len(parsed)} items")
+                    return parsed
+                except Exception as e:
+                    logger.error(f"❌ Failed to parse {array_name}: {e}")
+                    return []
+            elif isinstance(data, list):
+                logger.info(f"✅ {array_name} already a list: {len(data)} items")
+                return data
+            else:
+                logger.warning(f"⚠️ {array_name} is unexpected type: {type(data)}")
+                return []
+
+        # Apply parsing to ALL arrays
+        all_transactions = ensure_list(all_transactions, "transactions")
+        parked_measures = ensure_list(parked_measures, "parked_measures")
+        direct_costs = ensure_list(direct_costs, "direct_costs")
+        booked_measures = ensure_list(booked_measures, "booked_measures")
+        outliers = ensure_list(outliers, "outliers")
+        placeholders = ensure_list(placeholders, "placeholders")
+
+        # ✅ STEP 2: If transactions array is STILL empty, rebuild it from components
         if len(all_transactions) == 0 and (len(direct_costs) > 0 or len(booked_measures) > 0 or len(parked_measures) > 0):
             logger.info("🔧 FIXING: transactions array is empty, rebuilding from component arrays...")
             
@@ -298,24 +322,25 @@ def get_transactions():
                 logger.info(f"✅ Added {len(placeholders)} placeholders to transactions")
             
             logger.info(f"🔧 FIXED: Rebuilt transactions array with {len(all_transactions)} total transactions")
-        
-        # Parse string representations if needed
-        def ensure_list(data):
-            if isinstance(data, str):
-                try:
-                    return parse_python_string_to_list(data)
-                except:
-                    return []
-            return data if isinstance(data, list) else []
-        
-        all_transactions = ensure_list(all_transactions)
-        parked_measures = ensure_list(parked_measures)
-        direct_costs = ensure_list(direct_costs)
-        booked_measures = ensure_list(booked_measures)
-        outliers = ensure_list(outliers)
-        placeholders = ensure_list(placeholders)
-        
-        logger.info(f"📊 Transaction counts: all={len(all_transactions)}, parked={len(parked_measures)}, direct={len(direct_costs)}, booked={len(booked_measures)}, outliers={len(outliers)}")
+
+        logger.info(f"📊 FINAL COUNTS: all={len(all_transactions)}, parked={len(parked_measures)}, direct={len(direct_costs)}, booked={len(booked_measures)}, outliers={len(outliers)}")
+
+        # ✅ STEP 3: Validate the arrays contain correct data types
+        def validate_array_content(array, array_name):
+            if len(array) > 0:
+                sample = array[0]
+                if isinstance(sample, dict):
+                    logger.info(f"✅ {array_name} contains proper dict objects")
+                    if 'category' in sample:
+                        categories = list(set([item.get('category', 'NO_CATEGORY') for item in array[:100]]))  # Check first 100
+                        logger.info(f"✅ {array_name} categories: {categories}")
+                else:
+                    logger.warning(f"⚠️ {array_name} contains {type(sample)} instead of dict")
+
+        validate_array_content(all_transactions, "all_transactions")
+        validate_array_content(parked_measures, "parked_measures") 
+        validate_array_content(direct_costs, "direct_costs")
+        validate_array_content(booked_measures, "booked_measures")
         
         # Apply filters to the main transactions array (which contains all transaction types)
         filtered_transactions = all_transactions
@@ -488,7 +513,7 @@ def get_transactions_fixed():
                 "raw_data_type": type(raw_transactions_data).__name__
             }), 500
         
-        # Extract arrays
+        # ✅ CRITICAL FIX: Extract arrays with proper parsing for ALL arrays
         all_transactions = parsed_transactions_data.get('transactions', [])
         parked_measures = parsed_transactions_data.get('parked_measures', [])
         direct_costs = parsed_transactions_data.get('direct_costs', [])
@@ -496,9 +521,33 @@ def get_transactions_fixed():
         outliers = parsed_transactions_data.get('outliers', [])
         placeholders = parsed_transactions_data.get('placeholders', [])
         statistics = parsed_transactions_data.get('statistics', {})
-        
-        # 🚨 CRITICAL FIX: If transactions array is empty but other arrays have data,
-        # combine them to build the complete transactions array
+
+        # ✅ STEP 1: Parse string representations if needed for ALL arrays
+        def ensure_list(data, array_name):
+            if isinstance(data, str):
+                try:
+                    parsed = parse_python_string_to_list(data)
+                    logger.info(f"✅ Parsed {array_name} from string: {len(parsed)} items")
+                    return parsed
+                except Exception as e:
+                    logger.error(f"❌ Failed to parse {array_name}: {e}")
+                    return []
+            elif isinstance(data, list):
+                logger.info(f"✅ {array_name} already a list: {len(data)} items")
+                return data
+            else:
+                logger.warning(f"⚠️ {array_name} is unexpected type: {type(data)}")
+                return []
+
+        # Apply parsing to ALL arrays
+        all_transactions = ensure_list(all_transactions, "transactions")
+        parked_measures = ensure_list(parked_measures, "parked_measures")
+        direct_costs = ensure_list(direct_costs, "direct_costs")
+        booked_measures = ensure_list(booked_measures, "booked_measures")
+        outliers = ensure_list(outliers, "outliers")
+        placeholders = ensure_list(placeholders, "placeholders")
+
+        # ✅ STEP 2: If transactions array is STILL empty, rebuild it from components
         if len(all_transactions) == 0 and (len(direct_costs) > 0 or len(booked_measures) > 0 or len(parked_measures) > 0):
             logger.info("🔧 FIXING: transactions array is empty, rebuilding from component arrays...")
             
@@ -531,8 +580,25 @@ def get_transactions_fixed():
                 logger.info(f"✅ Added {len(placeholders)} placeholders to transactions")
             
             logger.info(f"🔧 FIXED: Rebuilt transactions array with {len(all_transactions)} total transactions")
-        
-        logger.info(f"📊 Final counts: all={len(all_transactions)}, parked={len(parked_measures)}, direct={len(direct_costs)}, booked={len(booked_measures)}")
+
+        logger.info(f"📊 FINAL COUNTS: all={len(all_transactions)}, parked={len(parked_measures)}, direct={len(direct_costs)}, booked={len(booked_measures)}, outliers={len(outliers)}")
+
+        # ✅ STEP 3: Validate the arrays contain correct data types
+        def validate_array_content(array, array_name):
+            if len(array) > 0:
+                sample = array[0]
+                if isinstance(sample, dict):
+                    logger.info(f"✅ {array_name} contains proper dict objects")
+                    if 'category' in sample:
+                        categories = list(set([item.get('category', 'NO_CATEGORY') for item in array[:100]]))  # Check first 100
+                        logger.info(f"✅ {array_name} categories: {categories}")
+                else:
+                    logger.warning(f"⚠️ {array_name} contains {type(sample)} instead of dict")
+
+        validate_array_content(all_transactions, "all_transactions")
+        validate_array_content(parked_measures, "parked_measures") 
+        validate_array_content(direct_costs, "direct_costs")
+        validate_array_content(booked_measures, "booked_measures")
         
         # Apply filters
         filtered_transactions = all_transactions
