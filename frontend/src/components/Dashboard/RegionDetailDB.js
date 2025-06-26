@@ -1,5 +1,12 @@
 import React, { useState, useMemo } from 'react';
 
+console.log('🔍 RegionDetail Debug:', {
+  selectedRegion,
+  transactionsCount: transactions?.length || 0,
+  sampleTransaction: transactions?.[0],
+  baseApiUrl
+});
+
 /**
  * Component to display region detail view with transactions and reversible assignments. THIS COMPONENT WAS AGNOSTIC AND THEREFORE DID NOT NEED DATABASE CONVERSION (SO NO TXT. file)
  */
