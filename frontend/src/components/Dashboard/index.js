@@ -42,11 +42,17 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
     fetchTransactions
   } = useTransactionData(baseApiUrl, selectedDepartment, selectedRegion);
 
-  console.log('🔍 useTransactionData Hook Response:', {
+  // ✅ ENHANCED DEBUG - expand the transactions object
+console.log('🔍 useTransactionData Hook Response:', {
   transactions,
   transactionsType: typeof transactions,
   hasTransactionsProperty: 'transactions' in (transactions || {}),
   transactionsKeys: transactions ? Object.keys(transactions) : 'null',
+  // ✅ ADD THESE LINES TO SEE THE ACTUAL DATA
+  transactionsTransactions: transactions?.transactions,
+  transactionsTransactionsLength: transactions?.transactions?.length,
+  transactionsParkedMeasures: transactions?.parked_measures,
+  transactionsParkedMeasuresLength: transactions?.parked_measures?.length,
   selectedDepartment,
   selectedRegion,
   error: transactionsError
