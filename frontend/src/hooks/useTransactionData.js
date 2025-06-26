@@ -20,6 +20,9 @@ export const useTransactionData = (baseApiUrl, department, region) => {
     // ✅ FIX 1: Always fetch data, don't return early
     // The component can decide what to do with empty filters
     
+    // ✅ FIX: Define URL variable outside try block to avoid scope issues
+    let url = '';
+    
     try {
       setLoading(true);
       setError(null);
@@ -30,7 +33,7 @@ export const useTransactionData = (baseApiUrl, department, region) => {
         : baseApiUrl;
       
       // ✅ FIX 3: Build URL with proper query parameters
-      let url = `${normalizedApiUrl}/api/transactions`;
+      url = `${normalizedApiUrl}/api/transactions`;
       const queryParams = [];
       
       if (department) {
@@ -130,7 +133,7 @@ export const useTransactionData = (baseApiUrl, department, region) => {
       console.error('❌ useTransactionData: Fetch error:', {
         message: err.message,
         stack: err.stack,
-        url: url,
+        url,
         department,
         region
       });
