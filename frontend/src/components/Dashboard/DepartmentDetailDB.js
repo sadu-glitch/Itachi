@@ -207,6 +207,7 @@ const DepartmentDetail = ({
   console.log('🔍 DEBUG DepartmentDetail - Regions received:', regions);
   console.log('🔍 DEBUG DepartmentDetail - Regions count:', regions.length);
 
+
   // ✅ DATABASE INTEGRATION: Replace hook with state management
   const [budgetData, setBudgetData] = useState({ departments: {}, regions: {} });
   const [budgetDataLoading, setBudgetDataLoading] = useState(false);

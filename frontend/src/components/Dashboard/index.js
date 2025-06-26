@@ -41,6 +41,16 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
     error: transactionsError,
     fetchTransactions
   } = useTransactionData(baseApiUrl, selectedDepartment, selectedRegion);
+
+  console.log('🔍 useTransactionData Hook Response:', {
+  transactions,
+  transactionsType: typeof transactions,
+  hasTransactionsProperty: 'transactions' in (transactions || {}),
+  transactionsKeys: transactions ? Object.keys(transactions) : 'null',
+  selectedDepartment,
+  selectedRegion,
+  error: transactionsError
+});
   
   // ✅ DEBUG: Add comprehensive debugging for departments data
   useEffect(() => {
