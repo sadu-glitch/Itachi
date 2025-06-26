@@ -224,7 +224,7 @@ def get_data():
 
 @app.route('/api/transactions', methods=['GET'])
 def get_transactions():
-    """Get transactions data - accurate version based on processing code structure"""
+    """Get transactions data - FIXED VERSION"""
     try:
         logger.info("🔍 Starting /api/transactions request...")
         
@@ -263,6 +263,41 @@ def get_transactions():
         outliers = transactions_data.get('outliers', [])
         placeholders = transactions_data.get('placeholders', [])
         statistics = transactions_data.get('statistics', {})
+        
+        # 🚨 CRITICAL FIX: If transactions array is empty but other arrays have data,
+        # combine them to build the complete transactions array
+        if len(all_transactions) == 0 and (len(direct_costs) > 0 or len(booked_measures) > 0 or len(parked_measures) > 0):
+            logger.info("🔧 FIXING: transactions array is empty, rebuilding from component arrays...")
+            
+            # Rebuild the complete transactions array from components
+            all_transactions = []
+            
+            # Add direct costs
+            if direct_costs:
+                all_transactions.extend(direct_costs)
+                logger.info(f"✅ Added {len(direct_costs)} direct costs to transactions")
+            
+            # Add booked measures  
+            if booked_measures:
+                all_transactions.extend(booked_measures)
+                logger.info(f"✅ Added {len(booked_measures)} booked measures to transactions")
+            
+            # Add parked measures
+            if parked_measures:
+                all_transactions.extend(parked_measures)
+                logger.info(f"✅ Added {len(parked_measures)} parked measures to transactions")
+            
+            # Add outliers if they exist
+            if outliers:
+                all_transactions.extend(outliers)
+                logger.info(f"✅ Added {len(outliers)} outliers to transactions")
+            
+            # Add placeholders if they exist
+            if placeholders:
+                all_transactions.extend(placeholders)
+                logger.info(f"✅ Added {len(placeholders)} placeholders to transactions")
+            
+            logger.info(f"🔧 FIXED: Rebuilt transactions array with {len(all_transactions)} total transactions")
         
         # Parse string representations if needed
         def ensure_list(data):
@@ -458,7 +493,44 @@ def get_transactions_fixed():
         parked_measures = parsed_transactions_data.get('parked_measures', [])
         direct_costs = parsed_transactions_data.get('direct_costs', [])
         booked_measures = parsed_transactions_data.get('booked_measures', [])
+        outliers = parsed_transactions_data.get('outliers', [])
+        placeholders = parsed_transactions_data.get('placeholders', [])
         statistics = parsed_transactions_data.get('statistics', {})
+        
+        # 🚨 CRITICAL FIX: If transactions array is empty but other arrays have data,
+        # combine them to build the complete transactions array
+        if len(all_transactions) == 0 and (len(direct_costs) > 0 or len(booked_measures) > 0 or len(parked_measures) > 0):
+            logger.info("🔧 FIXING: transactions array is empty, rebuilding from component arrays...")
+            
+            # Rebuild the complete transactions array from components
+            all_transactions = []
+            
+            # Add direct costs
+            if direct_costs:
+                all_transactions.extend(direct_costs)
+                logger.info(f"✅ Added {len(direct_costs)} direct costs to transactions")
+            
+            # Add booked measures  
+            if booked_measures:
+                all_transactions.extend(booked_measures)
+                logger.info(f"✅ Added {len(booked_measures)} booked measures to transactions")
+            
+            # Add parked measures
+            if parked_measures:
+                all_transactions.extend(parked_measures)
+                logger.info(f"✅ Added {len(parked_measures)} parked measures to transactions")
+            
+            # Add outliers if they exist
+            if outliers:
+                all_transactions.extend(outliers)
+                logger.info(f"✅ Added {len(outliers)} outliers to transactions")
+            
+            # Add placeholders if they exist
+            if placeholders:
+                all_transactions.extend(placeholders)
+                logger.info(f"✅ Added {len(placeholders)} placeholders to transactions")
+            
+            logger.info(f"🔧 FIXED: Rebuilt transactions array with {len(all_transactions)} total transactions")
         
         logger.info(f"📊 Final counts: all={len(all_transactions)}, parked={len(parked_measures)}, direct={len(direct_costs)}, booked={len(booked_measures)}")
         
@@ -492,6 +564,8 @@ def get_transactions_fixed():
             "parked_measures": filtered_parked_measures,
             "direct_costs": direct_costs,
             "booked_measures": booked_measures,
+            "outliers": outliers,
+            "placeholders": placeholders,
             "statistics": statistics,
             "summary": {
                 "total_transactions": len(all_transactions),
@@ -514,7 +588,8 @@ def get_transactions_fixed():
             },
             "debug_info": {
                 "endpoint": "FIXED VERSION",
-                "parsing_method": "safe_parse_json_fields_FIXED"
+                "parsing_method": "safe_parse_json_fields_FIXED",
+                "arrays_rebuilt": len(all_transactions) > 0
             }
         }
         
@@ -531,702 +606,14 @@ def get_transactions_fixed():
             "message": str(e)
         }), 500
 
-@app.route('/api/debug-data', methods=['GET'])
-def debug_data():
-    """Debug endpoint to see what's actually in the database"""
-    try:
-        logger.info("🔍 DEBUG: Starting debug data check...")
-        
-        # Check what's actually in the database for each table
-        debug_info = {}
-        
-        # Check frontend_departments
-        try:
-            departments_data = get_processed_data_from_database("frontend_departments")
-            debug_info['frontend_departments'] = {
-                'exists': departments_data is not None,
-                'type': type(departments_data).__name__,
-                'content': departments_data if departments_data else 'NULL',
-                'keys': list(departments_data.keys()) if isinstance(departments_data, dict) else 'N/A'
-            }
-            logger.info(f"🔍 DEBUG: frontend_departments: {debug_info['frontend_departments']}")
-        except Exception as e:
-            debug_info['frontend_departments'] = {'error': str(e)}
-        
-        # Check frontend_regions  
-        try:
-            regions_data = get_processed_data_from_database("frontend_regions")
-            debug_info['frontend_regions'] = {
-                'exists': regions_data is not None,
-                'type': type(regions_data).__name__,
-                'content': regions_data if regions_data else 'NULL', 
-                'keys': list(regions_data.keys()) if isinstance(regions_data, dict) else 'N/A'
-            }
-            logger.info(f"🔍 DEBUG: frontend_regions: {debug_info['frontend_regions']}")
-        except Exception as e:
-            debug_info['frontend_regions'] = {'error': str(e)}
-        
-        # Check transactions
-        try:
-            transactions_data = get_processed_data_from_database("transactions")
-            debug_info['transactions'] = {
-                'exists': transactions_data is not None,
-                'type': type(transactions_data).__name__,
-                'has_transactions': 'transactions' in transactions_data if isinstance(transactions_data, dict) else False,
-                'keys': list(transactions_data.keys()) if isinstance(transactions_data, dict) else 'N/A'
-            }
-            logger.info(f"🔍 DEBUG: transactions: {debug_info['transactions']}")
-        except Exception as e:
-            debug_info['transactions'] = {'error': str(e)}
-        
-        # Check budget allocation
-        try:
-            budget_data = get_processed_data_from_database("budget_allocation")
-            debug_info['budget_allocation'] = {
-                'exists': budget_data is not None,
-                'type': type(budget_data).__name__,
-                'departments_count': len(budget_data.get('departments', {})) if isinstance(budget_data, dict) else 'N/A',
-                'regions_count': len(budget_data.get('regions', {})) if isinstance(budget_data, dict) else 'N/A',
-                'keys': list(budget_data.keys()) if isinstance(budget_data, dict) else 'N/A'
-            }
-            logger.info(f"🔍 DEBUG: budget_allocation: {debug_info['budget_allocation']}")
-        except Exception as e:
-            debug_info['budget_allocation'] = {'error': str(e)}
-        
-        # Try to see all available results
-        try:
-            from msp_sap_integration_fixed import get_all_available_results
-            available_results = get_all_available_results()
-            debug_info['available_results'] = available_results
-            logger.info(f"🔍 DEBUG: available_results: {available_results}")
-        except Exception as e:
-            debug_info['available_results'] = {'error': str(e)}
-        
-        return jsonify({
-            'debug_info': debug_info,
-            'timestamp': datetime.now().isoformat(),
-            'status': 'debug_complete'
-        })
-        
-    except Exception as e:
-        logger.error(f"❌ Debug endpoint error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/deep-debug', methods=['GET'])
-def deep_debug():
-    """Comprehensive debugging endpoint to understand data flow issues"""
-    try:
-        debug_results = {}
-        
-        # 1. Test database connection
-        try:
-            db_mgr = get_db_manager()
-            connection_ok = db_mgr.test_connection()
-            debug_results['database_connection'] = {
-                'status': 'connected' if connection_ok else 'failed',
-                'server': DB_SERVER,
-                'database': DB_NAME
-            }
-        except Exception as e:
-            debug_results['database_connection'] = {
-                'status': 'error',
-                'error': str(e)
-            }
-        
-        # 2. Check raw database data
-        try:
-            # Get the raw transactions data from database
-            raw_data = get_processed_data_from_database("transactions")
-            
-            debug_results['raw_database_data'] = {
-                'type': type(raw_data).__name__,
-                'is_dict': isinstance(raw_data, dict),
-                'keys': list(raw_data.keys()) if isinstance(raw_data, dict) else 'Not a dict',
-                'size_estimate': len(str(raw_data))
-            }
-            
-            # If it's a dict, check the transactions key specifically
-            if isinstance(raw_data, dict):
-                transactions_raw = raw_data.get('transactions', None)
-                debug_results['transactions_raw'] = {
-                    'exists': 'transactions' in raw_data,
-                    'type': type(transactions_raw).__name__,
-                    'is_list': isinstance(transactions_raw, list),
-                    'is_string': isinstance(transactions_raw, str),
-                    'count': len(transactions_raw) if isinstance(transactions_raw, (list, str)) else 0
-                }
-                
-                # If it's a string, try to show a sample
-                if isinstance(transactions_raw, str):
-                    debug_results['transactions_raw']['sample'] = transactions_raw[:200] + '...' if len(transactions_raw) > 200 else transactions_raw
-                
-                # Check other keys
-                for key in ['parked_measures', 'direct_costs', 'booked_measures', 'statistics']:
-                    if key in raw_data:
-                        value = raw_data[key]
-                        debug_results[f'{key}_raw'] = {
-                            'type': type(value).__name__,
-                            'count': len(value) if isinstance(value, (list, str, dict)) else 0
-                        }
-            
-        except Exception as e:
-            debug_results['raw_database_data'] = {
-                'error': str(e),
-                'error_type': type(e).__name__
-            }
-        
-        # 3. Test the parsing function
-        try:
-            raw_data = get_processed_data_from_database("transactions")
-            parsed_data = safe_parse_json_fields(raw_data)
-            
-            debug_results['parsing_test'] = {
-                'raw_type': type(raw_data).__name__,
-                'parsed_type': type(parsed_data).__name__,
-                'parsing_changed_data': str(raw_data) != str(parsed_data)
-            }
-            
-            if isinstance(parsed_data, dict):
-                transactions_parsed = parsed_data.get('transactions', [])
-                debug_results['transactions_parsed'] = {
-                    'type': type(transactions_parsed).__name__,
-                    'count': len(transactions_parsed) if isinstance(transactions_parsed, list) else 0,
-                    'first_item_type': type(transactions_parsed[0]).__name__ if isinstance(transactions_parsed, list) and len(transactions_parsed) > 0 else 'N/A'
-                }
-                
-                # Sample transaction analysis
-                if isinstance(transactions_parsed, list) and len(transactions_parsed) > 0:
-                    sample_tx = transactions_parsed[0]
-                    debug_results['sample_transaction'] = {
-                        'keys': list(sample_tx.keys()) if isinstance(sample_tx, dict) else 'Not a dict',
-                        'category': sample_tx.get('category', 'NO_CATEGORY') if isinstance(sample_tx, dict) else 'N/A',
-                        'budget_impact': sample_tx.get('budget_impact', 'NO_IMPACT') if isinstance(sample_tx, dict) else 'N/A',
-                        'department': sample_tx.get('department', 'NO_DEPARTMENT') if isinstance(sample_tx, dict) else 'N/A'
-                    }
-                    
-                    # Category breakdown
-                    category_counts = {}
-                    budget_impact_counts = {}
-                    
-                    for tx in transactions_parsed:
-                        if isinstance(tx, dict):
-                            cat = tx.get('category', 'NO_CATEGORY')
-                            category_counts[cat] = category_counts.get(cat, 0) + 1
-                            
-                            impact = tx.get('budget_impact', 'NO_IMPACT')
-                            budget_impact_counts[impact] = budget_impact_counts.get(impact, 0) + 1
-                    
-                    debug_results['transaction_analysis'] = {
-                        'category_breakdown': category_counts,
-                        'budget_impact_breakdown': budget_impact_counts,
-                        'total_analyzed': len(transactions_parsed)
-                    }
-            
-        except Exception as e:
-            debug_results['parsing_test'] = {
-                'error': str(e),
-                'error_type': type(e).__name__
-            }
-        
-        # 4. Test source data availability
-        try:
-            db_mgr = get_db_manager()
-            
-            source_data_status = {}
-            
-            # Check each source table
-            tables_to_check = [
-                ('sap_transactions', 'BULK_IMPORT_%'),
-                ('msp_measures', 'MSP_%'),
-                ('kostenstelle_mapping_floor', 'BULK_IMPORT_%'),
-                ('kostenstelle_mapping_hq', 'HQ_FIX_%')
-            ]
-            
-            for table_name, pattern in tables_to_check:
-                try:
-                    latest_batch = db_mgr.get_latest_batch_id(table_name, pattern)
-                    
-                    # Count records in latest batch
-                    if latest_batch:
-                        query = text(f"SELECT COUNT(*) FROM {table_name} WHERE batch_id = :batch_id")
-                        with db_mgr.engine.connect() as conn:
-                            count = conn.execute(query, {"batch_id": latest_batch}).scalar()
-                    else:
-                        count = 0
-                    
-                    source_data_status[table_name] = {
-                        'latest_batch': latest_batch,
-                        'record_count': count,
-                        'has_data': count > 0
-                    }
-                    
-                except Exception as table_error:
-                    source_data_status[table_name] = {
-                        'error': str(table_error)
-                    }
-            
-            debug_results['source_data_status'] = source_data_status
-            
-        except Exception as e:
-            debug_results['source_data_status'] = {
-                'error': str(e)
-            }
-        
-        # 5. Test manual Bestellnummer extraction
-        try:
-            import re
-            
-            # Get a few sample SAP transactions
-            query = text("""
-                SELECT TOP 5 text_field 
-                FROM sap_transactions 
-                ORDER BY upload_date DESC
-            """)
-            
-            with db_mgr.engine.connect() as conn:
-                results = conn.execute(query).fetchall()
-            
-            bestellnummer_test = []
-            for row in results:
-                text_field = str(row[0])
-                matches = re.findall(r'\b\d{4}\b', text_field)
-                valid_numbers = [int(num) for num in matches if int(num) >= 3000]
-                
-                bestellnummer_test.append({
-                    'text_field': text_field[:100],  # First 100 chars
-                    'matches_found': matches,
-                    'valid_bestellnummer': valid_numbers[0] if valid_numbers else None
-                })
-            
-            debug_results['bestellnummer_extraction_test'] = {
-                'samples_tested': len(bestellnummer_test),
-                'samples': bestellnummer_test,
-                'valid_extractions': len([t for t in bestellnummer_test if t['valid_bestellnummer']])
-            }
-            
-        except Exception as e:
-            debug_results['bestellnummer_extraction_test'] = {
-                'error': str(e)
-            }
-        
-        # 6. Final recommendations
-        recommendations = []
-        
-        if debug_results.get('raw_database_data', {}).get('keys') == 'Not a dict':
-            recommendations.append("❌ Raw database data is not a dictionary - check data storage format")
-        
-        if debug_results.get('transactions_raw', {}).get('is_string'):
-            recommendations.append("⚠️ Transactions stored as string - parsing may be needed")
-        
-        if debug_results.get('transaction_analysis', {}).get('category_breakdown', {}).get('DIRECT_COST', 0) == debug_results.get('transaction_analysis', {}).get('total_analyzed', 0):
-            recommendations.append("❌ All transactions are DIRECT_COST - Bestellnummer matching not working")
-        
-        if not any(debug_results.get('source_data_status', {}).get(table, {}).get('has_data', False) for table in ['sap_transactions', 'msp_measures']):
-            recommendations.append("❌ No source data found - run data import first")
-        
-        if debug_results.get('bestellnummer_extraction_test', {}).get('valid_extractions', 0) == 0:
-            recommendations.append("❌ Bestellnummer extraction failing - check text field format")
-        
-        debug_results['recommendations'] = recommendations
-        debug_results['timestamp'] = datetime.now().isoformat()
-        
-        return jsonify(debug_results)
-        
-    except Exception as e:
-        logger.error(f"Deep debug error: {str(e)}")
-        import traceback
-        return jsonify({
-            "error": str(e),
-            "traceback": traceback.format_exc(),
-            "timestamp": datetime.now().isoformat()
-        }), 500
-
-@app.route('/api/budget-allocation', methods=['GET', 'POST'])
-def budget_allocation():
-    """Get or update budget allocations with database storage and audit trail"""
-    try:
-        if request.method == 'GET':
-            try:
-                budgets = get_processed_data_from_database("budget_allocation")
-                logger.info(f"📊 Returning budget data with {len(budgets.get('departments', {}))} departments")
-                return jsonify(budgets)
-            except Exception as e:
-                logger.warning(f"⚠️ No budget file found, returning empty structure: {str(e)}")
-                return jsonify({
-                    "departments": {},
-                    "regions": {},
-                    "last_updated": None
-                })
-        
-        elif request.method == 'POST':
-            data = request.get_json()
-            
-            if not data:
-                return jsonify({"status": "error", "message": "No data provided"}), 400
-            
-            # Validate data structure
-            if 'departments' not in data or 'regions' not in data:
-                return jsonify({"status": "error", "message": "Invalid data structure"}), 400
-            
-            # AUDIT: Extract user information from headers
-            user_name = request.headers.get('X-User-Name', 'Unknown User')
-            change_reason = request.headers.get('X-Change-Reason', 'Budget allocation update')
-            user_ip = request.remote_addr
-            user_agent = request.headers.get('User-Agent', 'Unknown Browser')[:100]
-            
-            # Create unique user ID and change ID
-            user_id = f"user_{user_name.replace(' ', '_').lower()}_{int(datetime.now().timestamp())}"
-            change_id = f"CHG_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{user_name.replace(' ', '_')[:10]}"
-            
-            logger.info(f"🔄 Budget update request from: {user_name} ({user_ip})")
-            
-            # Load existing data from database
-            try:
-                existing_budgets = get_processed_data_from_database("budget_allocation")
-                logger.info(f"✅ Loaded existing budget file")
-            except Exception as e:
-                logger.info(f"📝 Creating new budget file: {str(e)}")
-                existing_budgets = {}
-            
-            # SAFETY: Create backup before any changes
-            backup_success = create_database_backup(existing_budgets, change_id, user_name)
-            if backup_success:
-                logger.info(f"🔒 SAFETY: Created database backup for change {change_id}")
-            
-            # Ensure structure exists
-            if 'departments' not in existing_budgets or existing_budgets['departments'] is None:
-                existing_budgets['departments'] = {}
-            if 'regions' not in existing_budgets or existing_budgets['regions'] is None:
-                existing_budgets['regions'] = {}
-            
-            # AUDIT: Prepare audit trail
-            audit_entries = []
-            change_timestamp = datetime.now().isoformat()
-            
-            # Process department changes with audit logging
-            departments_updated = []
-            for new_dept_name, new_dept_data in data['departments'].items():
-                old_budget = 0
-                if new_dept_name in existing_budgets['departments']:
-                    old_budget = existing_budgets['departments'][new_dept_name].get('allocated_budget', 0)
-                
-                new_budget = new_dept_data['allocated_budget']
-                
-                # Only log if there's an actual change
-                if old_budget != new_budget:
-                    audit_entry = {
-                        'change_id': change_id,
-                        'timestamp': change_timestamp,
-                        'user_name': user_name,
-                        'user_id': user_id,
-                        'user_ip': user_ip,
-                        'user_agent': user_agent,
-                        'change_type': 'department_budget',
-                        'entity_type': 'department',
-                        'entity_key': new_dept_name,
-                        'entity_name': new_dept_name.split('|')[0],
-                        'old_value': old_budget,
-                        'new_value': new_budget,
-                        'change_amount': new_budget - old_budget,
-                        'change_reason': change_reason,
-                        'backup_reference': change_id
-                    }
-                    audit_entries.append(audit_entry)
-                    
-                    logger.info(f"📝 AUDIT: {user_name} changed {new_dept_name} budget: €{old_budget:,.2f} → €{new_budget:,.2f}")
-                
-                existing_budgets['departments'][new_dept_name] = new_dept_data
-                departments_updated.append(new_dept_name)
-            
-            # Process region changes with audit logging
-            regions_updated = []
-            new_dept_names = list(data['departments'].keys())
-            
-            # Remove old region entries for departments being updated
-            regions_to_remove = []
-            for existing_region_key in list(existing_budgets['regions'].keys()):
-                for updating_dept_name in new_dept_names:
-                    if existing_region_key.startswith(f"{updating_dept_name}|"):
-                        old_region_budget = existing_budgets['regions'][existing_region_key].get('allocated_budget', 0)
-                        
-                        # Log region removal if it had a budget
-                        if old_region_budget > 0:
-                            audit_entry = {
-                                'change_id': change_id,
-                                'timestamp': change_timestamp,
-                                'user_name': user_name,
-                                'user_id': user_id,
-                                'user_ip': user_ip,
-                                'user_agent': user_agent,
-                                'change_type': 'region_budget',
-                                'entity_type': 'region',
-                                'entity_key': existing_region_key,
-                                'entity_name': existing_region_key.split('|')[1],
-                                'old_value': old_region_budget,
-                                'new_value': 0,
-                                'change_amount': -old_region_budget,
-                                'change_reason': f"Region reallocation for {change_reason}",
-                                'backup_reference': change_id
-                            }
-                            audit_entries.append(audit_entry)
-                        
-                        regions_to_remove.append(existing_region_key)
-                        break
-            
-            # Remove the old regions
-            for region_key in regions_to_remove:
-                if region_key in existing_budgets['regions']:
-                    del existing_budgets['regions'][region_key]
-                    logger.info(f"🗑️ Removed old region: {region_key}")
-            
-            # Add new regions with audit logging
-            for new_region_key, new_region_data in data['regions'].items():
-                new_region_budget = new_region_data['allocated_budget']
-                
-                # Log new region budget allocation
-                if new_region_budget > 0:
-                    audit_entry = {
-                        'change_id': change_id,
-                        'timestamp': change_timestamp,
-                        'user_name': user_name,
-                        'user_id': user_id,
-                        'user_ip': user_ip,
-                        'user_agent': user_agent,
-                        'change_type': 'region_budget',
-                        'entity_type': 'region',
-                        'entity_key': new_region_key,
-                        'entity_name': new_region_key.split('|')[1],
-                        'old_value': 0,
-                        'new_value': new_region_budget,
-                        'change_amount': new_region_budget,
-                        'change_reason': change_reason,
-                        'backup_reference': change_id
-                    }
-                    audit_entries.append(audit_entry)
-                
-                existing_budgets['regions'][new_region_key] = new_region_data
-                regions_updated.append(new_region_key)
-                logger.info(f"➕ Added/updated region: {new_region_key}")
-            
-            # Add metadata
-            existing_budgets['last_updated'] = change_timestamp
-            existing_budgets['last_change_id'] = change_id
-            existing_budgets['last_updated_by'] = {
-                'user_name': user_name,
-                'user_id': user_id,
-                'user_ip': user_ip,
-                'change_reason': change_reason
-            }
-            
-            # Save the updated budget data to database
-            try:
-                save_to_database_as_json("budget_allocation", existing_budgets)
-                logger.info(f"💾 Successfully saved budget data to database")
-                
-            except Exception as save_error:
-                logger.error(f"❌ CRITICAL: Failed to save budget data: {str(save_error)}")
-                return jsonify({"status": "error", "message": f"Failed to save: {str(save_error)}"}), 500
-            
-            # AUDIT: Save audit trail if there were any changes
-            if audit_entries:
-                try:
-                    save_database_audit_trail(audit_entries)
-                    logger.info(f"📋 AUDIT: Saved {len(audit_entries)} audit entries for change {change_id}")
-                except Exception as audit_error:
-                    logger.error(f"❌ Failed to save audit trail: {str(audit_error)}")
-                    # Don't fail the request if audit logging fails, but log the error
-            
-            return jsonify({
-                "status": "success", 
-                "message": f"Budget saved successfully by {user_name}",
-                "change_id": change_id,
-                "departments_updated": len(departments_updated),
-                "regions_updated": len(regions_updated),
-                "audit_entries": len(audit_entries),
-                "backup_created": True,
-                "updated_by": user_name
-            })
-    
-    except Exception as e:
-        logger.error(f"❌ Budget allocation error: {str(e)}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-def save_database_audit_trail(audit_entries):
-    """Save audit trail entries to database"""
-    try:
-        # Load existing audit trail from database
-        try:
-            existing_audit = get_processed_data_from_database("budget_audit_trail_consolidated")
-            if 'entries' not in existing_audit:
-                existing_audit['entries'] = []
-            if 'metadata' not in existing_audit:
-                existing_audit['metadata'] = {}
-        except Exception as e:
-            logger.info(f"Creating new audit trail: {str(e)}")
-            existing_audit = {
-                'entries': [],
-                'metadata': {
-                    'created': datetime.now().isoformat(),
-                    'total_changes': 0,
-                    'file_description': 'Database-stored budget audit trail'
-                }
-            }
-        
-        # Add new entries at the beginning (most recent first)
-        existing_audit['entries'] = audit_entries + existing_audit['entries']
-        
-        # Update metadata
-        existing_audit['metadata']['last_updated'] = datetime.now().isoformat()
-        existing_audit['metadata']['total_entries'] = len(existing_audit['entries'])
-        existing_audit['metadata']['total_changes'] = existing_audit['metadata'].get('total_changes', 0) + len(audit_entries)
-        
-        # Keep only the most recent 1000 entries to manage size
-        max_entries = 1000
-        if len(existing_audit['entries']) > max_entries:
-            existing_audit['entries'] = existing_audit['entries'][:max_entries]
-            existing_audit['metadata']['archived_entries'] = len(existing_audit['entries']) - max_entries
-            existing_audit['metadata']['last_archive_date'] = datetime.now().isoformat()
-            logger.info(f"📦 Trimmed audit trail to {max_entries} entries")
-        
-        # Save updated audit trail to database
-        save_to_database_as_json("budget_audit_trail_consolidated", existing_audit)
-        
-        logger.info(f"✅ Database audit trail updated with {len(audit_entries)} new entries")
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to save database audit trail: {str(e)}")
-        raise
-
-def create_database_backup(current_data, change_id, user_name):
-    """Create backup in database"""
-    try:
-        # Load existing backup data from database
-        try:
-            backup_data = get_processed_data_from_database("budget_backups_consolidated")
-            if 'backups' not in backup_data:
-                backup_data['backups'] = []
-            if 'metadata' not in backup_data:
-                backup_data['metadata'] = {}
-        except Exception as e:
-            logger.info(f"Creating new backup structure: {str(e)}")
-            backup_data = {
-                'backups': [],
-                'metadata': {
-                    'created': datetime.now().isoformat(),
-                    'description': 'Database-stored budget backups'
-                }
-            }
-        
-        # Create backup entry
-        backup_entry = {
-            'backup_id': change_id,
-            'timestamp': datetime.now().isoformat(),
-            'user_name': user_name,
-            'data_snapshot': current_data.copy() if current_data else {}
-        }
-        
-        # Add to beginning of list (most recent first)
-        backup_data['backups'].insert(0, backup_entry)
-        
-        # Keep only the most recent 50 backups
-        max_backups = 50
-        if len(backup_data['backups']) > max_backups:
-            backup_data['backups'] = backup_data['backups'][:max_backups]
-            logger.info(f"🗂️ Trimmed backup history to {max_backups} entries")
-        
-        # Update metadata
-        backup_data['metadata']['last_updated'] = datetime.now().isoformat()
-        backup_data['metadata']['total_backups'] = len(backup_data['backups'])
-        backup_data['metadata']['last_backup_by'] = user_name
-        
-        # Save backup to database
-        save_to_database_as_json("budget_backups_consolidated", backup_data)
-        
-        logger.info(f"✅ Created database backup (ID: {change_id})")
-        return True
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to create database backup: {str(e)}")
-        return False
-
-@app.route('/api/budget-history', methods=['GET'])
-def get_budget_history():
-    """Get budget change history from database"""
-    try:
-        # Get query parameters
-        entity_key = request.args.get('entity_key')
-        entity_type = request.args.get('entity_type')
-        user_name = request.args.get('user_name')
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
-        limit = int(request.args.get('limit', 100))
-        
-        # Load audit trail from database
-        try:
-            audit_data = get_processed_data_from_database("budget_audit_trail_consolidated")
-            all_entries = audit_data.get('entries', [])
-        except Exception as e:
-            logger.warning(f"No audit trail found: {str(e)}")
-            return jsonify({'entries': [], 'total': 0, 'filtered': 0})
-        
-        # Apply filters
-        filtered_entries = all_entries
-        
-        if entity_key:
-            filtered_entries = [e for e in filtered_entries if e.get('entity_key') == entity_key]
-        
-        if entity_type:
-            filtered_entries = [e for e in filtered_entries if e.get('entity_type') == entity_type]
-        
-        if user_name:
-            filtered_entries = [e for e in filtered_entries if e.get('user_name') == user_name]
-        
-        if start_date:
-            filtered_entries = [e for e in filtered_entries if e.get('timestamp', '') >= start_date]
-        
-        if end_date:
-            filtered_entries = [e for e in filtered_entries if e.get('timestamp', '') <= end_date]
-        
-        # Apply limit
-        limited_entries = filtered_entries[:limit]
-        
-        return jsonify({
-            'entries': limited_entries,
-            'total': len(all_entries),
-            'filtered': len(filtered_entries),
-            'returned': len(limited_entries),
-            'filters_applied': {
-                'entity_key': entity_key,
-                'entity_type': entity_type,
-                'user_name': user_name,
-                'start_date': start_date,
-                'end_date': end_date,
-                'limit': limit
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"Error getting budget history: {str(e)}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
 @app.route('/api/assign-measure', methods=['POST'])
 def assign_measure():
     """Manually assign a parked measure to a region/district, or unassign"""
     try:
-        logger.info(f"=== ASSIGN MEASURE DEBUG ===")
-        logger.info(f"Content-Type: {request.content_type}")
-        logger.info(f"Raw data: {request.data}")
-        logger.info(f"Raw data type: {type(request.data)}")
-        
         assignment = request.get_json()
-        
-        logger.info(f"Parsed assignment: {assignment}")
-        logger.info(f"Assignment type: {type(assignment)}")
-        logger.info(f"=== END DEBUG ===")
 
         # Validate data structure
         if not isinstance(assignment, dict):
-            logger.error(f"❌ Invalid data type received: {type(assignment)}")
             return jsonify({
                 "status": "error", 
                 "message": f"Expected dict, got {type(assignment)}",
@@ -1339,84 +726,53 @@ def assign_measure():
         
     except Exception as e:
         logger.error(f"Error in assign/unassign measure: {str(e)}")
-        logger.error(f"Exception type: {type(e)}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# Additional endpoints with shorter implementations for brevity
-@app.route('/api/bulk-assign-measures', methods=['POST'])
-def bulk_assign_measures():
-    """Bulk assign multiple parked measures to regions/districts"""
+@app.route('/api/budget-allocation', methods=['GET', 'POST'])
+def budget_allocation():
+    """Get or update budget allocations with database storage and audit trail"""
     try:
-        assignments = request.get_json()
-        
-        if not isinstance(assignments, list):
-            return jsonify({"status": "error", "message": "Expected a list of assignments"}), 400
-        
-        # Get the current transactions from database
-        transactions = get_processed_data_from_database("transactions")
-        transactions = safe_parse_json_fields(transactions)
-        
-        # Track which measures were successfully assigned
-        successful_assignments = []
-        failed_assignments = []
-        
-        # Process each assignment
-        for assignment in assignments:
-            # Validate required fields
-            required_fields = ['bestellnummer', 'region', 'district']
-            if not all(field in assignment for field in required_fields):
-                failed_assignments.append({
-                    "bestellnummer": assignment.get('bestellnummer', 'unknown'),
-                    "reason": "Missing required fields"
-                })
-                continue
-            
-            # Find the measure to update
-            measure_found = False
-            for measure in transactions['parked_measures']:
-                if measure['bestellnummer'] == assignment['bestellnummer']:
-                    measure_found = True
-                    measure['manual_assignment'] = {
-                        'region': assignment['region'],
-                        'district': assignment['district']
-                    }
-                    measure['region'] = assignment['region']
-                    measure['district'] = assignment['district']
-                    measure['status'] = 'Manually assigned, awaiting SAP'
-                    
-                    # Also update in the transactions list
-                    for tx in transactions['transactions']:
-                        if tx.get('bestellnummer') == assignment['bestellnummer'] and tx.get('category') == 'PARKED_MEASURE':
-                            tx['manual_assignment'] = measure['manual_assignment']
-                            tx['region'] = assignment['region']
-                            tx['district'] = assignment['district']
-                            tx['status'] = 'Manually assigned, awaiting SAP'
-                    
-                    successful_assignments.append(assignment['bestellnummer'])
-                    break
-            
-            if not measure_found:
-                failed_assignments.append({
-                    "bestellnummer": assignment['bestellnummer'],
-                    "reason": "Measure not found"
+        if request.method == 'GET':
+            try:
+                budgets = get_processed_data_from_database("budget_allocation")
+                logger.info(f"📊 Returning budget data with {len(budgets.get('departments', {}))} departments")
+                return jsonify(budgets)
+            except Exception as e:
+                logger.warning(f"⚠️ No budget file found, returning empty structure: {str(e)}")
+                return jsonify({
+                    "departments": {},
+                    "regions": {},
+                    "last_updated": None
                 })
         
-        # Save updated transactions to database
-        save_to_database_as_json("transactions", transactions)
-        
-        # Update frontend views in database
-        generate_frontend_views_to_database(transactions)
-        
-        return jsonify({
-            "status": "success", 
-            "successful_assignments": successful_assignments,
-            "failed_assignments": failed_assignments
-        })
-        
+        elif request.method == 'POST':
+            data = request.get_json()
+            
+            if not data:
+                return jsonify({"status": "error", "message": "No data provided"}), 400
+            
+            # Validate data structure
+            if 'departments' not in data or 'regions' not in data:
+                return jsonify({"status": "error", "message": "Invalid data structure"}), 400
+            
+            # Save the updated budget data to database
+            try:
+                save_to_database_as_json("budget_allocation", data)
+                logger.info(f"💾 Successfully saved budget data to database")
+                
+                return jsonify({
+                    "status": "success", 
+                    "message": "Budget saved successfully"
+                })
+                
+            except Exception as save_error:
+                logger.error(f"❌ CRITICAL: Failed to save budget data: {str(save_error)}")
+                return jsonify({"status": "error", "message": f"Failed to save: {str(save_error)}"}), 500
+    
     except Exception as e:
-        logger.error(f"Error in bulk assignment: {str(e)}")
+        logger.error(f"❌ Budget allocation error: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/process', methods=['POST'])
@@ -1465,90 +821,58 @@ def database_status():
             "timestamp": datetime.now().isoformat()
         }), 500
 
-@app.route('/api/available-results', methods=['GET'])
-def get_available_results():
-    """Get list of all available results in the database"""
+@app.route('/api/debug-data', methods=['GET'])
+def debug_data():
+    """Debug endpoint to see what's actually in the database"""
     try:
-        from msp_sap_integration_fixed import get_all_available_results
-        results = get_all_available_results()
+        logger.info("🔍 DEBUG: Starting debug data check...")
+        
+        # Check what's actually in the database for each table
+        debug_info = {}
+        
+        # Check frontend_departments
+        try:
+            departments_data = get_processed_data_from_database("frontend_departments")
+            debug_info['frontend_departments'] = {
+                'exists': departments_data is not None,
+                'type': type(departments_data).__name__,
+                'keys': list(departments_data.keys()) if isinstance(departments_data, dict) else 'N/A'
+            }
+        except Exception as e:
+            debug_info['frontend_departments'] = {'error': str(e)}
+        
+        # Check frontend_regions  
+        try:
+            regions_data = get_processed_data_from_database("frontend_regions")
+            debug_info['frontend_regions'] = {
+                'exists': regions_data is not None,
+                'type': type(regions_data).__name__,
+                'keys': list(regions_data.keys()) if isinstance(regions_data, dict) else 'N/A'
+            }
+        except Exception as e:
+            debug_info['frontend_regions'] = {'error': str(e)}
+        
+        # Check transactions
+        try:
+            transactions_data = get_processed_data_from_database("transactions")
+            debug_info['transactions'] = {
+                'exists': transactions_data is not None,
+                'type': type(transactions_data).__name__,
+                'has_transactions': 'transactions' in transactions_data if isinstance(transactions_data, dict) else False,
+                'keys': list(transactions_data.keys()) if isinstance(transactions_data, dict) else 'N/A'
+            }
+        except Exception as e:
+            debug_info['transactions'] = {'error': str(e)}
         
         return jsonify({
-            "available_results": results,
-            "total": len(results),
-            "timestamp": datetime.now().isoformat()
+            'debug_info': debug_info,
+            'timestamp': datetime.now().isoformat(),
+            'status': 'debug_complete'
         })
-    except Exception as e:
-        logger.error(f"Error getting available results: {str(e)}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-@app.route('/api/batch-info', methods=['GET'])
-def get_batch_info():
-    """Get information about the latest batches in each table"""
-    try:
-        db_mgr = get_db_manager()
-        
-        batch_info = {}
-        
-        # Get latest batch IDs for each table
-        tables = {
-            'sap_transactions': 'BULK_IMPORT_%',
-            'msp_measures': 'MSP_%',
-            'kostenstelle_mapping_floor': 'BULK_IMPORT_%',
-            'kostenstelle_mapping_hq': 'HQ_FIX_%'
-        }
-        
-        for table_name, pattern in tables.items():
-            try:
-                latest_batch = db_mgr.get_latest_batch_id(table_name, pattern)
-                batch_info[table_name] = {
-                    "latest_batch": latest_batch,
-                    "pattern": pattern
-                }
-            except Exception as e:
-                batch_info[table_name] = {
-                    "latest_batch": None,
-                    "error": str(e),
-                    "pattern": pattern
-                }
-        
-        return jsonify({
-            "batch_info": batch_info,
-            "timestamp": datetime.now().isoformat()
-        })
-    except Exception as e:
-        logger.error(f"Error getting batch info: {str(e)}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-@app.route('/api/export-data/<result_type>', methods=['GET'])
-def export_data(result_type):
-    """Export processed data as JSON file for download"""
-    try:
-        # Get data from database
-        data = get_processed_data_from_database(result_type)
-        
-        if not data:
-            return jsonify({"status": "error", "message": f"No data found for {result_type}"}), 404
-        
-        # Create a temporary file
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as temp_file:
-            json.dump(data, temp_file, cls=JSONEncoder, indent=2)
-            temp_path = temp_file.name
-        
-        # Generate filename
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"{result_type}_{timestamp}.json"
-        
-        # Send the file
-        return send_file(
-            temp_path,
-            mimetype='application/json',
-            as_attachment=True,
-            download_name=filename
-        )
         
     except Exception as e:
-        logger.error(f"Error exporting data: {str(e)}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        logger.error(f"❌ Debug endpoint error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
@@ -1595,6 +919,38 @@ def health_check():
             "timestamp": datetime.now().isoformat()
         }), 500
 
+# Additional helper endpoints
+@app.route('/api/export-data/<result_type>', methods=['GET'])
+def export_data(result_type):
+    """Export processed data as JSON file for download"""
+    try:
+        # Get data from database
+        data = get_processed_data_from_database(result_type)
+        
+        if not data:
+            return jsonify({"status": "error", "message": f"No data found for {result_type}"}), 404
+        
+        # Create a temporary file
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as temp_file:
+            json.dump(data, temp_file, cls=JSONEncoder, indent=2)
+            temp_path = temp_file.name
+        
+        # Generate filename
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"{result_type}_{timestamp}.json"
+        
+        # Send the file
+        return send_file(
+            temp_path,
+            mimetype='application/json',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+    except Exception as e:
+        logger.error(f"Error exporting data: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 # Legacy endpoints for backward compatibility
 @app.route('/api/upload-file', methods=['POST'])
 def upload_file():
@@ -1609,106 +965,6 @@ def upload_file():
         }
     }), 200
 
-@app.route('/api/download-file/<container>/<filename>', methods=['GET'])
-def download_file(container, filename):
-    """Legacy endpoint - data now in database"""
-    return jsonify({
-        "status": "info",
-        "message": "File downloads replaced with database queries.",
-        "suggestion": f"Use /api/export-data/{filename.replace('.json', '')} instead",
-        "available_exports": ["transactions", "budget_allocation", "frontend_departments", "frontend_regions"]
-    }), 200
-
-@app.route('/api/list-files/<container>', methods=['GET'])
-def list_files(container):
-    """Legacy endpoint - now shows available database results"""
-    try:
-        from msp_sap_integration_fixed import get_all_available_results
-        results = get_all_available_results()
-        
-        return jsonify({
-            "status": "migrated",
-            "message": f"Container '{container}' replaced with database storage",
-            "available_results": results,
-            "note": "Use /api/available-results for current data"
-        })
-    except Exception as e:
-        return jsonify({
-            "status": "info",
-            "message": "System migrated to database storage",
-            "container": container,
-            "error": str(e)
-        })
-
-@app.route('/api/cleanup-storage', methods=['POST'])
-def cleanup_storage():
-    """Database maintenance endpoint"""
-    try:
-        cleanup_data = request.get_json() or {}
-        days_to_keep = cleanup_data.get('days_to_keep', 90)
-        
-        return jsonify({
-            "status": "success",
-            "message": f"Database maintenance completed (keeping last {days_to_keep} days)",
-            "storage_type": "Azure SQL Database",
-            "note": "Database automatically manages storage optimization"
-        })
-        
-    except Exception as e:
-        logger.error(f"Error in database maintenance: {str(e)}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-# Debug endpoints for database version
-@app.route('/api/debug-budgets', methods=['GET'])
-def debug_budgets():
-    """Debug route to see what budget data exists in database"""
-    try:
-        budgets = get_processed_data_from_database("budget_allocation")
-        return jsonify({
-            "departments": list(budgets.get('departments', {}).keys())[:10],  # First 10
-            "regions": list(budgets.get('regions', {}).keys())[:10],  # First 10
-            "total_departments": len(budgets.get('departments', {})),
-            "total_regions": len(budgets.get('regions', {})),
-            "last_updated": budgets.get('last_updated'),
-            "storage": "Azure SQL Database"
-        })
-    except Exception as e:
-        return jsonify({"error": str(e), "storage": "Azure SQL Database"})
-
-@app.route('/api/test-department/<path:dept_name>', methods=['GET'])
-def test_department(dept_name):
-    """Test route to debug URL encoding"""
-    decoded = unquote(dept_name)
-    return jsonify({
-        "original": dept_name,
-        "decoded": decoded,
-        "test": "Database API route is working",
-        "version": "2.0.0"
-    })
-
-@app.route('/api/debug-request', methods=['POST'])
-def debug_request():
-    """Debug endpoint to see exactly what data is being received"""
-    try:
-        return jsonify({
-            "content_type": request.content_type,
-            "raw_data": str(request.data),
-            "raw_data_type": str(type(request.data)),
-            "get_json_result": request.get_json(),
-            "get_json_type": str(type(request.get_json())),
-            "headers": dict(request.headers),
-            "method": request.method,
-            "debug_info": "This endpoint helps debug the data structure issue"
-        })
-    except Exception as e:
-        return jsonify({
-            "error": str(e),
-            "error_type": str(type(e)),
-            "raw_data": str(request.data),
-            "content_type": request.content_type,
-            "debug_info": "Error occurred during debugging"
-        })
-
 if __name__ == '__main__':
     # Check if database password is set before starting
     if not os.getenv("DB_PASSWORD"):
@@ -1716,5 +972,5 @@ if __name__ == '__main__':
         print("The API will start but database operations will fail.")
         print("Please set DB_PASSWORD before using database features.")
     
-    # Start the Flask app on a different port for testing
-    app.run(host='0.0.0.0', port=5001, debug=True)  # ← Changed to port 5001
+    # Start the Flask app
+    app.run(host='0.0.0.0', port=5001, debug=True)
