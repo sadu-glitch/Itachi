@@ -9,6 +9,7 @@ import { useTransactionData } from '../../hooks/useTransactionData';
 import { useBudgetProgress } from '../../hooks/useBudget';
 import EnhancedExcelExportButton from './EnhancedExcelExportButton';
 import '../../styles/excel-export.css';
+import TransactionDebugger from './TransactionDebugger';
 
 const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
   // State for navigation and selection
@@ -239,6 +240,13 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
         <div>Selected Department: {selectedDepartment || 'None'}</div>
         <div>Selected Region: {selectedRegion || 'None'}</div>
       </div>
+      
+      {/* ✅ ADD THE DEBUG COMPONENT HERE */}
+      <TransactionDebugger 
+        baseApiUrl={baseApiUrl}
+        selectedDepartment={selectedDepartment}
+        selectedRegion={selectedRegion}
+      />
       
       {/* Conditional rendering based on selection state */}
       {!selectedDepartment && (
