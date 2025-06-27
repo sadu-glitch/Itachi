@@ -22,7 +22,8 @@ const TransactionDebugger = ({ baseApiUrl, selectedDepartment, selectedRegion })
         : baseApiUrl;
 
       // Build URL with filters if department is selected
-      let url = `${normalizedApiUrl}/api/transactions`;
+      // In TransactionDebugger.js, change this line:
+      let url = `${normalizedApiUrl}/api/transactions-fixed`; // Instead of /api/transactions;
       if (selectedDepartment) {
         url += `?department=${encodeURIComponent(selectedDepartment)}`;
       }
