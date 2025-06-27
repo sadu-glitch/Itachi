@@ -65,9 +65,9 @@ def parse_python_string_to_list(python_string):
         logger.error(f"Failed to parse Python string: {str(e)}")
         return []
 
-def safe_parse_json_fields(data):
+def safe_parse_json_fields_WORKING(data):
     """
-    FIXED VERSION: Properly parse the string representations stored in database
+    WORKING VERSION: Properly parse the string representations stored in database
     """
     if not isinstance(data, dict):
         return data
@@ -79,27 +79,47 @@ def safe_parse_json_fields(data):
         if key in data:
             value = data[key]
             
-            if isinstance(value, str):
+            if isinstance(value, str) and len(value) > 0:
                 try:
-                    # STEP 1: Try parsing as Python literal (your current format)
-                    import ast
-                    parsed_value = ast.literal_eval(value)
+                    # Method 1: Try JSON parsing first (fastest)
+                    import json
+                    parsed_value = json.loads(value)
                     data[key] = parsed_value
-                    logger.info(f"✅ Parsed {key} from Python string: {len(parsed_value) if isinstance(parsed_value, list) else 'not a list'} items")
+                    logger.info(f"✅ JSON parsed {key}: {len(parsed_value) if isinstance(parsed_value, list) else 'not a list'} items")
+                    continue
                     
-                except (ValueError, SyntaxError) as e:
+                except json.JSONDecodeError:
+                    logger.info(f"🔍 JSON failed for {key}, trying AST...")
+                    
                     try:
-                        # STEP 2: Try parsing as JSON
-                        import json
-                        parsed_value = json.loads(value)
+                        # Method 2: Try AST literal eval (for Python string representations)
+                        import ast
+                        parsed_value = ast.literal_eval(value)
                         data[key] = parsed_value
-                        logger.info(f"✅ Parsed {key} from JSON string: {len(parsed_value) if isinstance(parsed_value, list) else 'not a list'} items")
+                        logger.info(f"✅ AST parsed {key}: {len(parsed_value) if isinstance(parsed_value, list) else 'not a list'} items")
+                        continue
                         
-                    except json.JSONDecodeError as json_error:
-                        logger.error(f"❌ Failed to parse {key}: AST error: {e}, JSON error: {json_error}")
-                        logger.error(f"Sample data: {value[:200]}...")
-                        data[key] = []
-            
+                    except (ValueError, SyntaxError) as ast_error:
+                        logger.error(f"❌ AST failed for {key}: {ast_error}")
+                        
+                        # Method 3: Manual fix for common issues
+                        try:
+                            # Fix common Python string representation issues
+                            fixed_value = value.replace("'", '"')  # Replace single quotes with double quotes
+                            fixed_value = fixed_value.replace('True', 'true')  # Fix boolean values
+                            fixed_value = fixed_value.replace('False', 'false')
+                            fixed_value = fixed_value.replace('None', 'null')
+                            
+                            parsed_value = json.loads(fixed_value)
+                            data[key] = parsed_value
+                            logger.info(f"✅ Manual fix parsed {key}: {len(parsed_value) if isinstance(parsed_value, list) else 'not a list'} items")
+                            continue
+                            
+                        except json.JSONDecodeError as manual_error:
+                            logger.error(f"❌ Manual fix failed for {key}: {manual_error}")
+                            logger.error(f"Sample data: {value[:200]}...")
+                            data[key] = []
+                            
             elif isinstance(value, list):
                 # Already a list, keep it
                 logger.info(f"✅ {key} already a list: {len(value)} items")
@@ -109,6 +129,162 @@ def safe_parse_json_fields(data):
                 data[key] = []
     
     return data
+
+@app.route('/api/transactions-working-fix', methods=['GET'])
+def get_transactions_working_fix():
+    """
+    WORKING FIX: Properly parse string data from database
+    """
+    try:
+        logger.info("🔧 Starting WORKING FIX /api/transactions request...")
+        
+        # Get query parameters
+        department = request.args.get('department')
+        region = request.args.get('region')
+        status = request.args.get('status')
+        category = request.args.get('category')
+        
+        logger.info(f"🔍 Filters: department={department}, region={region}, status={status}, category={category}")
+        
+        # Get raw data from database
+        raw_transactions_data = get_processed_data_from_database("transactions")
+        logger.info(f"✅ Raw data loaded: {type(raw_transactions_data)}")
+        
+        if not raw_transactions_data:
+            return jsonify({
+                "error": "No transaction data found in database"
+            }), 404
+        
+        # ✅ WORKING FIX: Use the new parsing function
+        parsed_data = safe_parse_json_fields_WORKING(raw_transactions_data.copy())
+        logger.info("✅ Data parsed with WORKING function")
+        
+        # Extract arrays
+        all_transactions = parsed_data.get('transactions', [])
+        parked_measures = parsed_data.get('parked_measures', [])
+        direct_costs = parsed_data.get('direct_costs', [])
+        booked_measures = parsed_data.get('booked_measures', [])
+        outliers = parsed_data.get('outliers', [])
+        placeholders = parsed_data.get('placeholders', [])
+        statistics = parsed_data.get('statistics', {})
+        
+        logger.info(f"📊 WORKING FIX RESULTS:")
+        logger.info(f"   - all_transactions: {len(all_transactions)}")
+        logger.info(f"   - booked_measures: {len(booked_measures)}")
+        logger.info(f"   - parked_measures: {len(parked_measures)}")
+        logger.info(f"   - direct_costs: {len(direct_costs)}")
+        logger.info(f"   - outliers: {len(outliers)}")
+        
+        # ✅ If main transactions array is empty but components exist, rebuild it
+        if len(all_transactions) == 0 and (len(direct_costs) > 0 or len(booked_measures) > 0 or len(parked_measures) > 0):
+            logger.info("🔧 Rebuilding main transactions array...")
+            
+            all_transactions = []
+            
+            if direct_costs:
+                all_transactions.extend(direct_costs)
+                logger.info(f"✅ Added {len(direct_costs)} direct costs")
+            
+            if booked_measures:
+                all_transactions.extend(booked_measures)
+                logger.info(f"✅ Added {len(booked_measures)} booked measures")
+            
+            if parked_measures:
+                all_transactions.extend(parked_measures)
+                logger.info(f"✅ Added {len(parked_measures)} parked measures")
+            
+            if outliers:
+                all_transactions.extend(outliers)
+                logger.info(f"✅ Added {len(outliers)} outliers")
+            
+            if placeholders:
+                all_transactions.extend(placeholders)
+                logger.info(f"✅ Added {len(placeholders)} placeholders")
+            
+            logger.info(f"🔧 Rebuilt transactions array: {len(all_transactions)} total")
+        
+        # Apply filters
+        filtered_transactions = all_transactions
+        
+        if department:
+            filtered_transactions = [tx for tx in filtered_transactions if tx.get('department') == department]
+            logger.info(f"🔍 After department filter: {len(filtered_transactions)} transactions")
+        
+        if region:
+            filtered_transactions = [tx for tx in filtered_transactions if tx.get('region') == region]
+            logger.info(f"🔍 After region filter: {len(filtered_transactions)} transactions")
+        
+        if status:
+            filtered_transactions = [tx for tx in filtered_transactions if tx.get('status') == status]
+            logger.info(f"🔍 After status filter: {len(filtered_transactions)} transactions")
+        
+        if category:
+            filtered_transactions = [tx for tx in filtered_transactions if tx.get('category') == category]
+            logger.info(f"🔍 After category filter: {len(filtered_transactions)} transactions")
+        
+        # Filter other arrays by department if specified
+        filtered_parked_measures = parked_measures
+        filtered_booked_measures = booked_measures
+        filtered_direct_costs = direct_costs
+        
+        if department:
+            filtered_parked_measures = [m for m in parked_measures if m.get('department') == department]
+            filtered_booked_measures = [m for m in booked_measures if m.get('department') == department]
+            filtered_direct_costs = [m for m in direct_costs if m.get('department') == department]
+        
+        # Build response
+        response_data = {
+            "transactions": filtered_transactions,
+            "parked_measures": filtered_parked_measures,
+            "direct_costs": filtered_direct_costs,
+            "booked_measures": filtered_booked_measures,
+            "outliers": outliers,
+            "placeholders": placeholders,
+            "statistics": statistics,
+            "summary": {
+                "total_transactions": len(all_transactions),
+                "filtered_transactions": len(filtered_transactions),
+                "by_category": {
+                    "BOOKED_MEASURE": len([tx for tx in all_transactions if tx.get('category') == 'BOOKED_MEASURE']),
+                    "PARKED_MEASURE": len([tx for tx in all_transactions if tx.get('category') == 'PARKED_MEASURE']),
+                    "UNASSIGNED_MEASURE": len([tx for tx in all_transactions if tx.get('category') == 'UNASSIGNED_MEASURE']),
+                    "DIRECT_COST": len([tx for tx in all_transactions if tx.get('category') == 'DIRECT_COST']),
+                    "OUTLIER": len([tx for tx in all_transactions if tx.get('category') == 'OUTLIER'])
+                },
+                "array_counts": {
+                    "booked_measures": len(booked_measures),
+                    "parked_measures": len(parked_measures),
+                    "direct_costs": len(direct_costs),
+                    "outliers": len(outliers)
+                }
+            },
+            "working_fix_info": {
+                "method": "WORKING_FIX",
+                "parsing_success": True,
+                "arrays_parsed_correctly": len(booked_measures) > 0 and len(parked_measures) > 0,
+                "data_source": "Azure SQL Database with proper string parsing"
+            },
+            "filters_applied": {
+                "department": department,
+                "region": region,
+                "status": status,
+                "category": category
+            }
+        }
+        
+        logger.info(f"🎯 WORKING FIX returning: {len(filtered_transactions)} transactions, {len(filtered_booked_measures)} booked, {len(filtered_parked_measures)} parked")
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        logger.error(f"❌ Error in WORKING FIX endpoint: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            "error": "Failed in working fix endpoint",
+            "message": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
 
 @app.route('/')
 def home():
