@@ -65,509 +65,50 @@ def parse_python_string_to_list(python_string):
         logger.error(f"Failed to parse Python string: {str(e)}")
         return []
 
-# Replace with this ROBUST fix that shows each step:
-
-def safe_parse_json_fields_BULLETPROOF(data):
+def safe_parse_json_fields(data):
     """
-    BULLETPROOF FIX: Uses regex replacement first, then eval as backup
+    FIXED VERSION: Properly parse the string representations stored in database
     """
     if not isinstance(data, dict):
         return data
     
+    # These keys are stored as Python string representations in your database
     keys_to_parse = ['transactions', 'parked_measures', 'direct_costs', 'booked_measures', 'outliers', 'placeholders']
     
     for key in keys_to_parse:
         if key in data:
             value = data[key]
             
-            if isinstance(value, str) and len(value) > 0:
-                logger.info(f"🔍 Parsing {key}: length={len(value)}")
-                
-                # Method 1: Try JSON parsing first
+            if isinstance(value, str):
                 try:
-                    import json
-                    parsed_value = json.loads(value)
-                    data[key] = parsed_value
-                    logger.info(f"✅ JSON parsed {key}: {len(parsed_value)} items")
-                    continue
-                except json.JSONDecodeError:
-                    pass
-                
-                # Method 2: Try AST literal eval 
-                try:
+                    # STEP 1: Try parsing as Python literal (your current format)
                     import ast
                     parsed_value = ast.literal_eval(value)
                     data[key] = parsed_value
-                    logger.info(f"✅ AST parsed {key}: {len(parsed_value)} items")
-                    continue
-                except (ValueError, SyntaxError):
-                    logger.info(f"❌ AST failed for {key} - contains function calls")
-                
-                # Method 3: REGEX REPLACEMENT APPROACH (most reliable)
-                try:
-                    import re
-                    logger.info(f"🔧 Applying regex fixes to {key}")
+                    logger.info(f"✅ Parsed {key} from Python string: {len(parsed_value) if isinstance(parsed_value, list) else 'not a list'} items")
                     
-                    # Start with the original value
-                    fixed_value = value
-                    
-                    # Replace datetime.date(YYYY, M, D) with "YYYY-MM-DD"
-                    def date_replacer(match):
-                        year, month, day = match.groups()
-                        formatted_date = f'"{year}-{month:0>2}-{day:0>2}"'
-                        logger.info(f"🔧 Replacing {match.group(0)} with {formatted_date}")
-                        return formatted_date
-                    
-                    date_pattern = r'datetime\.date\((\d{4}),\s*(\d{1,2}),\s*(\d{1,2})\)'
-                    fixed_value = re.sub(date_pattern, date_replacer, fixed_value)
-                    
-                    # Replace datetime.datetime(YYYY, M, D, H, M, S[, microsec]) with ISO string
-                    def datetime_replacer(match):
-                        groups = match.groups()
-                        year, month, day, hour, minute, second = groups[:6]
-                        microsecond = groups[6] if len(groups) > 6 and groups[6] else '0'
-                        formatted_datetime = f'"{year}-{month:0>2}-{day:0>2}T{hour:0>2}:{minute:0>2}:{second:0>2}.{microsecond:0>6}"'
-                        logger.info(f"🔧 Replacing {match.group(0)} with {formatted_datetime}")
-                        return formatted_datetime
-                    
-                    datetime_pattern = r'datetime\.datetime\((\d{4}),\s*(\d{1,2}),\s*(\d{1,2}),\s*(\d{1,2}),\s*(\d{1,2}),\s*(\d{1,2})(?:,\s*(\d+))?\)'
-                    fixed_value = re.sub(datetime_pattern, datetime_replacer, fixed_value)
-                    
-                    # Replace Decimal('123.45') with 123.45
-                    decimal_pattern = r"Decimal\('([^']+)'\)"
-                    fixed_value = re.sub(decimal_pattern, r'\1', fixed_value)
-                    
-                    # Replace UUID('...') with "..."
-                    uuid_pattern = r"UUID\('([^']+)'\)"
-                    fixed_value = re.sub(uuid_pattern, r'"\1"', fixed_value)
-                    
-                    logger.info(f"🔧 Regex replacements complete, attempting AST parse...")
-                    
-                    # Try to parse the fixed value with AST
-                    import ast
-                    parsed_value = ast.literal_eval(fixed_value)
-                    data[key] = parsed_value
-                    logger.info(f"✅ Regex + AST SUCCESS for {key}: {len(parsed_value)} items")
-                    continue
-                    
-                except Exception as regex_error:
-                    logger.error(f"❌ Regex approach failed for {key}: {str(regex_error)[:300]}")
-                    
-                    # Show a sample of what we tried to parse
-                    if 'fixed_value' in locals():
-                        logger.error(f"Sample fixed data: {fixed_value[:500]}...")
-                
-                # Method 4: CONTROLLED EVAL (last resort)
-                try:
-                    logger.warning(f"⚠️ Using controlled eval for {key}")
-                    
-                    from datetime import date, datetime, time
-                    from decimal import Decimal
-                    
-                    # Create safe evaluation namespace
-                    safe_namespace = {
-                        '__builtins__': {},  # No built-ins to prevent dangerous calls
-                        'datetime': type('datetime', (), {
-                            'date': date,
-                            'datetime': datetime,
-                            'time': time
-                        }),
-                        'Decimal': Decimal,
-                        'True': True,
-                        'False': False,
-                        'None': None,
-                    }
-                    
-                    # Evaluate the original string
-                    parsed_value = eval(value, safe_namespace, {})
-                    
-                    # Convert to JSON-safe format
-                    def to_json_safe(obj):
-                        if isinstance(obj, (date, datetime)):
-                            return obj.isoformat()
-                        elif isinstance(obj, time):
-                            return obj.isoformat()
-                        elif isinstance(obj, Decimal):
-                            return float(obj)
-                        elif isinstance(obj, list):
-                            return [to_json_safe(item) for item in obj]
-                        elif isinstance(obj, dict):
-                            return {k: to_json_safe(v) for k, v in obj.items()}
-                        else:
-                            return obj
-                    
-                    safe_value = to_json_safe(parsed_value)
-                    data[key] = safe_value
-                    logger.info(f"✅ Controlled eval SUCCESS for {key}: {len(safe_value)} items")
-                    continue
-                    
-                except Exception as eval_error:
-                    logger.error(f"❌ Controlled eval failed for {key}: {str(eval_error)[:300]}")
-                
-                # If everything fails
-                logger.error(f"💥 ALL METHODS FAILED for {key}")
-                data[key] = []
-                            
+                except (ValueError, SyntaxError) as e:
+                    try:
+                        # STEP 2: Try parsing as JSON
+                        import json
+                        parsed_value = json.loads(value)
+                        data[key] = parsed_value
+                        logger.info(f"✅ Parsed {key} from JSON string: {len(parsed_value) if isinstance(parsed_value, list) else 'not a list'} items")
+                        
+                    except json.JSONDecodeError as json_error:
+                        logger.error(f"❌ Failed to parse {key}: AST error: {e}, JSON error: {json_error}")
+                        logger.error(f"Sample data: {value[:200]}...")
+                        data[key] = []
+            
             elif isinstance(value, list):
+                # Already a list, keep it
                 logger.info(f"✅ {key} already a list: {len(value)} items")
+            
             else:
                 logger.warning(f"⚠️ {key} is unexpected type: {type(value)}")
                 data[key] = []
     
     return data
-
-
-# Enhanced test to show exactly what's happening:
-@app.route('/api/test-bulletproof', methods=['GET'])
-def test_bulletproof():
-    """
-    Test the bulletproof fix with detailed debugging
-    """
-    try:
-        import re
-        
-        # Get raw data
-        raw_data = get_processed_data_from_database("transactions")
-        
-        if 'booked_measures' not in raw_data:
-            return jsonify({'error': 'No booked_measures field found'})
-        
-        booked_raw = raw_data['booked_measures']
-        
-        # Take a very small sample - just enough for one complete record
-        # Find the first complete dictionary
-        start_idx = booked_raw.find('{')
-        if start_idx == -1:
-            return jsonify({'error': 'No dictionary found in data'})
-        
-        brace_count = 0
-        end_idx = start_idx
-        
-        for i in range(start_idx, len(booked_raw)):
-            char = booked_raw[i]
-            if char == '{':
-                brace_count += 1
-            elif char == '}':
-                brace_count -= 1
-                if brace_count == 0:
-                    end_idx = i + 1
-                    break
-        
-        # Extract just one complete record
-        single_record = '[' + booked_raw[start_idx:end_idx] + ']'
-        
-        # Show the patterns we found
-        datetime_patterns = re.findall(r'datetime\.date\(\d+,\s*\d+,\s*\d+\)', single_record)
-        
-        # Test the bulletproof parsing
-        test_data = {'booked_measures': single_record}
-        parsed_test_data = safe_parse_json_fields_BULLETPROOF(test_data)
-        
-        booked_measures = parsed_test_data['booked_measures']
-        
-        result = {
-            'input_sample': single_record,
-            'datetime_patterns_found': datetime_patterns,
-            'parsing_success': isinstance(booked_measures, list),
-            'parsed_count': len(booked_measures) if isinstance(booked_measures, list) else 0,
-            'sample_output': booked_measures[0] if isinstance(booked_measures, list) and len(booked_measures) > 0 else None,
-            'input_length': len(single_record)
-        }
-        
-        return jsonify(result)
-        
-    except Exception as e:
-        import traceback
-        return jsonify({
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }), 500
-
-
-# Simple test for the bulletproof approach:
-@app.route('/api/test-simple-bulletproof', methods=['GET'])
-def test_simple_bulletproof():
-    """
-    Test simple case with bulletproof fix
-    """
-    try:
-        # Simple test
-        test_string = '''[{'id': 1, 'date': datetime.date(2025, 1, 27), 'amount': 123.45}]'''
-        
-        test_data = {'test_field': test_string}
-        parsed_data = safe_parse_json_fields_BULLETPROOF(test_data)
-        
-        return jsonify({
-            'input': test_string,
-            'output': parsed_data['test_field'],
-            'success': isinstance(parsed_data['test_field'], list) and len(parsed_data['test_field']) > 0,
-            'parsed_date': parsed_data['test_field'][0].get('date') if (isinstance(parsed_data['test_field'], list) and len(parsed_data['test_field']) > 0) else None
-        })
-        
-    except Exception as e:
-        import traceback
-        return jsonify({
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }), 500
-
-# Fixed test endpoints with proper imports:
-@app.route('/api/test-final-fix', methods=['GET'])
-def test_final_fix():
-    """
-    Test the final working fix
-    """
-    try:
-        import re  # Add the missing import
-        
-        # Get raw data
-        raw_data = get_processed_data_from_database("transactions")
-        
-        if 'booked_measures' not in raw_data:
-            return jsonify({'error': 'No booked_measures field found'})
-        
-        booked_raw = raw_data['booked_measures']
-        
-        # Test on a small sample
-        small_sample = booked_raw[:2000]
-        
-        # Find the end of the first complete dictionary
-        brace_count = 0
-        end_pos = 0
-        for i, char in enumerate(small_sample):
-            if char == '{':
-                brace_count += 1
-            elif char == '}':
-                brace_count -= 1
-                if brace_count == 0:
-                    end_pos = i + 1
-                    break
-        
-        if end_pos > 0:
-            first_item = '[' + small_sample[1:end_pos] + ']'
-        else:
-            first_item = small_sample
-        
-        # Test the final parsing
-        test_data = {'booked_measures': first_item}
-        parsed_test_data = safe_parse_json_fields_FINAL(test_data)
-        
-        booked_measures = parsed_test_data['booked_measures']
-        
-        result = {
-            'parsing_success': isinstance(booked_measures, list),
-            'parsed_count': len(booked_measures) if isinstance(booked_measures, list) else 0,
-            'sample_input_length': len(first_item),
-            'sample_output': booked_measures[0] if isinstance(booked_measures, list) and len(booked_measures) > 0 else None,
-            'datetime_patterns_found': len(re.findall(r'datetime\.date\(\d+,\s*\d+,\s*\d+\)', first_item)),
-            'input_preview': first_item[:500]  # Show first 500 chars of input
-        }
-        
-        return jsonify(result)
-        
-    except Exception as e:
-        import traceback
-        return jsonify({
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }), 500
-
-
-@app.route('/api/test-simple-final', methods=['GET'])
-def test_simple_final():
-    """
-    Test with simple datetime case using final fix
-    """
-    try:
-        # Simple test case
-        test_string = '''[{'id': 1, 'name': 'test', 'date': datetime.date(2025, 1, 27), 'amount': 123.45}]'''
-        
-        # Test our final parsing function
-        test_data = {'test_field': test_string}
-        parsed_data = safe_parse_json_fields_FINAL(test_data)
-        
-        return jsonify({
-            'input': test_string,
-            'output': parsed_data['test_field'],
-            'success': isinstance(parsed_data['test_field'], list) and len(parsed_data['test_field']) > 0,
-            'count': len(parsed_data['test_field']) if isinstance(parsed_data['test_field'], list) else 0,
-            'parsed_date': parsed_data['test_field'][0]['date'] if (isinstance(parsed_data['test_field'], list) and len(parsed_data['test_field']) > 0) else None
-        })
-        
-    except Exception as e:
-        import traceback
-        return jsonify({
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }), 500
-    
-# ALSO add this simple manual test:
-@app.route('/api/test-simple-datetime', methods=['GET'])
-def test_simple_datetime():
-    """
-    Test with a manually created simple datetime case
-    """
-    try:
-        # Create a simple test case that mimics your data structure
-        test_string = '''[{'id': 1, 'name': 'test', 'date': datetime.date(2025, 1, 27), 'amount': 123.45}]'''
-        
-        # Test our parsing function
-        test_data = {'test_field': test_string}
-        parsed_data = safe_parse_json_fields_ROBUST(test_data)
-        
-        return jsonify({
-            'input': test_string,
-            'output': parsed_data['test_field'],
-            'success': isinstance(parsed_data['test_field'], list),
-            'count': len(parsed_data['test_field']) if isinstance(parsed_data['test_field'], list) else 0
-        })
-        
-    except Exception as e:
-        import traceback
-        return jsonify({
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }), 500
-
-
-# Test endpoint for the corrected fix:
-@app.route('/api/test-correct-fix', methods=['GET'])
-def test_correct_fix():
-    """
-    Test the corrected datetime.date fix
-    """
-    try:
-        # Get raw data
-        raw_data = get_processed_data_from_database("transactions")
-        
-        if 'booked_measures' not in raw_data:
-            return jsonify({'error': 'No booked_measures field found'})
-        
-        booked_raw = raw_data['booked_measures']
-        
-        # Test just the booked_measures
-        test_data = {'booked_measures': booked_raw}
-        parsed_test_data = safe_parse_json_fields_CORRECT_FIX(test_data)
-        
-        booked_measures = parsed_test_data['booked_measures']
-        
-        result = {
-            'parsing_success': isinstance(booked_measures, list),
-            'parsed_count': len(booked_measures) if isinstance(booked_measures, list) else 0,
-            'sample_items': booked_measures[:3] if isinstance(booked_measures, list) and len(booked_measures) > 0 else [],
-            'datetime_objects_found': 'datetime.date(' in booked_raw,
-            'sample_datetime_line': None
-        }
-        
-        # Find a line with datetime.date for analysis
-        if 'datetime.date(' in booked_raw:
-            lines = booked_raw.split('datetime.date(')
-            if len(lines) > 1:
-                result['sample_datetime_line'] = 'datetime.date(' + lines[1].split(')')[0] + ')'
-        
-        return jsonify(result)
-        
-    except Exception as e:
-        import traceback
-        return jsonify({
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }), 500
-
-
-# Update your main endpoint to use the new function:
-# In the get_transactions() function, change this line:
-# parsed_data = safe_parse_json_fields_TARGETED_FIX(raw_transactions_data.copy())
-
-# Also add this specific test endpoint:
-@app.route('/api/test-booked-parsing', methods=['GET'])
-def test_booked_parsing():
-    """
-    Test endpoint specifically for booked measures parsing
-    """
-    try:
-        # Get raw data
-        raw_data = get_processed_data_from_database("transactions")
-        
-        if 'booked_measures' not in raw_data:
-            return jsonify({'error': 'No booked_measures field found'})
-        
-        booked_raw = raw_data['booked_measures']
-        
-        if not isinstance(booked_raw, str):
-            return jsonify({'error': f'booked_measures is not a string, it is: {type(booked_raw)}'})
-        
-        # Show first 1000 characters for analysis
-        sample = booked_raw[:1000]
-        
-        # Try the targeted fix
-        test_data = {'booked_measures': booked_raw}
-        parsed_test_data = safe_parse_json_fields_TARGETED_FIX(test_data)
-        
-        result = {
-            'sample_data': sample,
-            'parsing_success': isinstance(parsed_test_data['booked_measures'], list),
-            'parsed_count': len(parsed_test_data['booked_measures']) if isinstance(parsed_test_data['booked_measures'], list) else 0,
-            'first_parsed_item': parsed_test_data['booked_measures'][0] if isinstance(parsed_test_data['booked_measures'], list) and len(parsed_test_data['booked_measures']) > 0 else None
-        }
-        
-        return jsonify(result)
-        
-    except Exception as e:
-        import traceback
-        return jsonify({
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }), 500
-
-
-# Also add this debugging endpoint to help us see what's in the raw data:
-@app.route('/api/debug-parsing', methods=['GET'])
-def debug_parsing():
-    """
-    Debug endpoint to see exactly what's happening with parsing
-    """
-    try:
-        # Get raw data
-        raw_data = get_processed_data_from_database("transactions")
-        
-        debug_info = {}
-        
-        # Check each field that should contain arrays
-        for key in ['booked_measures', 'parked_measures', 'direct_costs']:
-            if key in raw_data:
-                value = raw_data[key]
-                debug_info[key] = {
-                    'type': type(value).__name__,
-                    'length': len(value) if hasattr(value, '__len__') else 'N/A',
-                    'first_100_chars': str(value)[:100],
-                    'last_100_chars': str(value)[-100:] if len(str(value)) > 100 else 'N/A',
-                    'contains_brackets': '[' in str(value) and ']' in str(value),
-                    'starts_with_bracket': str(value).strip().startswith('['),
-                    'ends_with_bracket': str(value).strip().endswith(']'),
-                    'sample_parsing_attempt': None
-                }
-                
-                # Try a quick parsing attempt to see what fails
-                if isinstance(value, str) and len(value) > 0:
-                    try:
-                        import ast
-                        ast.literal_eval(value)
-                        debug_info[key]['sample_parsing_attempt'] = 'AST parsing would succeed'
-                    except Exception as e:
-                        debug_info[key]['sample_parsing_attempt'] = f'AST parsing fails: {str(e)[:200]}'
-        
-        return jsonify({
-            'debug_info': debug_info,
-            'recommendations': [
-                'Check the exact format of stored strings',
-                'Look for malformed quotes or brackets',
-                'Consider if data is double-encoded'
-            ]
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 @app.route('/')
 def home():
@@ -575,7 +116,7 @@ def home():
     return {
         "status": "online",
         "service": "MSP-SAP Integration API (Database Version)",
-        "version": "2.1.0",
+        "version": "2.0.0",
         "storage": "Azure SQL Database",
         "timestamp": datetime.now().isoformat()
     }
@@ -681,12 +222,241 @@ def get_data():
         logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# ✅ MAIN WORKING ENDPOINT - USE THIS ONE!
 @app.route('/api/transactions', methods=['GET'])
 def get_transactions():
-    """Get transactions data - WORKING VERSION WITH PROPER PARSING"""
+    """Get transactions data - FIXED VERSION"""
     try:
-        logger.info("🔧 Starting WORKING /api/transactions request...")
+        logger.info("🔍 Starting /api/transactions request...")
+        
+        # Get query parameters for filtering
+        department = request.args.get('department')
+        region = request.args.get('region')
+        status = request.args.get('status')
+        category = request.args.get('category')
+        
+        logger.info(f"🔍 Filters: department={department}, region={region}, status={status}, category={category}")
+        
+        # Get the complete transactions data from database
+        try:
+            transactions_data = get_processed_data_from_database("transactions")
+            logger.info(f"✅ Loaded transactions data from database: {type(transactions_data)}")
+            
+            # Parse any JSON string fields that might exist
+            transactions_data = safe_parse_json_fields(transactions_data)
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to load transactions: {str(e)}")
+            return jsonify({
+                "transactions": [],
+                "parked_measures": [],
+                "direct_costs": [],
+                "booked_measures": [],
+                "error": "Could not load transactions data",
+                "message": str(e)
+            }), 500
+        
+        # ✅ CRITICAL FIX: Extract arrays with proper parsing for ALL arrays
+        all_transactions = transactions_data.get('transactions', [])
+        parked_measures = transactions_data.get('parked_measures', [])
+        direct_costs = transactions_data.get('direct_costs', [])
+        booked_measures = transactions_data.get('booked_measures', [])
+        outliers = transactions_data.get('outliers', [])
+        placeholders = transactions_data.get('placeholders', [])
+        statistics = transactions_data.get('statistics', {})
+
+        # ✅ STEP 1: Parse string representations if needed for ALL arrays
+        def ensure_list(data, array_name):
+            if isinstance(data, str):
+                try:
+                    parsed = parse_python_string_to_list(data)
+                    logger.info(f"✅ Parsed {array_name} from string: {len(parsed)} items")
+                    return parsed
+                except Exception as e:
+                    logger.error(f"❌ Failed to parse {array_name}: {e}")
+                    return []
+            elif isinstance(data, list):
+                logger.info(f"✅ {array_name} already a list: {len(data)} items")
+                return data
+            else:
+                logger.warning(f"⚠️ {array_name} is unexpected type: {type(data)}")
+                return []
+
+        # Apply parsing to ALL arrays
+        all_transactions = ensure_list(all_transactions, "transactions")
+        parked_measures = ensure_list(parked_measures, "parked_measures")
+        direct_costs = ensure_list(direct_costs, "direct_costs")
+        booked_measures = ensure_list(booked_measures, "booked_measures")
+        outliers = ensure_list(outliers, "outliers")
+        placeholders = ensure_list(placeholders, "placeholders")
+
+        # ✅ STEP 2: If transactions array is STILL empty, rebuild it from components
+        if len(all_transactions) == 0 and (len(direct_costs) > 0 or len(booked_measures) > 0 or len(parked_measures) > 0):
+            logger.info("🔧 FIXING: transactions array is empty, rebuilding from component arrays...")
+            
+            # Rebuild the complete transactions array from components
+            all_transactions = []
+            
+            # Add direct costs
+            if direct_costs:
+                all_transactions.extend(direct_costs)
+                logger.info(f"✅ Added {len(direct_costs)} direct costs to transactions")
+            
+            # Add booked measures  
+            if booked_measures:
+                all_transactions.extend(booked_measures)
+                logger.info(f"✅ Added {len(booked_measures)} booked measures to transactions")
+            
+            # Add parked measures
+            if parked_measures:
+                all_transactions.extend(parked_measures)
+                logger.info(f"✅ Added {len(parked_measures)} parked measures to transactions")
+            
+            # Add outliers if they exist
+            if outliers:
+                all_transactions.extend(outliers)
+                logger.info(f"✅ Added {len(outliers)} outliers to transactions")
+            
+            # Add placeholders if they exist
+            if placeholders:
+                all_transactions.extend(placeholders)
+                logger.info(f"✅ Added {len(placeholders)} placeholders to transactions")
+            
+            logger.info(f"🔧 FIXED: Rebuilt transactions array with {len(all_transactions)} total transactions")
+
+        logger.info(f"📊 FINAL COUNTS: all={len(all_transactions)}, parked={len(parked_measures)}, direct={len(direct_costs)}, booked={len(booked_measures)}, outliers={len(outliers)}")
+
+        # ✅ STEP 3: Validate the arrays contain correct data types
+        def validate_array_content(array, array_name):
+            if len(array) > 0:
+                sample = array[0]
+                if isinstance(sample, dict):
+                    logger.info(f"✅ {array_name} contains proper dict objects")
+                    if 'category' in sample:
+                        categories = list(set([item.get('category', 'NO_CATEGORY') for item in array[:100]]))  # Check first 100
+                        logger.info(f"✅ {array_name} categories: {categories}")
+                else:
+                    logger.warning(f"⚠️ {array_name} contains {type(sample)} instead of dict")
+
+        validate_array_content(all_transactions, "all_transactions")
+        validate_array_content(parked_measures, "parked_measures") 
+        validate_array_content(direct_costs, "direct_costs")
+        validate_array_content(booked_measures, "booked_measures")
+        
+        # Apply filters to the main transactions array (which contains all transaction types)
+        filtered_transactions = all_transactions
+        
+        if department:
+            filtered_transactions = [
+                tx for tx in filtered_transactions 
+                if tx.get('department') == department
+            ]
+            logger.info(f"🔍 After department filter '{department}': {len(filtered_transactions)} transactions")
+        
+        if region:
+            filtered_transactions = [
+                tx for tx in filtered_transactions 
+                if tx.get('region') == region
+            ]
+            logger.info(f"🔍 After region filter '{region}': {len(filtered_transactions)} transactions")
+        
+        if status:
+            filtered_transactions = [
+                tx for tx in filtered_transactions 
+                if tx.get('status') == status
+            ]
+            logger.info(f"🔍 After status filter '{status}': {len(filtered_transactions)} transactions")
+        
+        if category:
+            filtered_transactions = [
+                tx for tx in filtered_transactions 
+                if tx.get('category') == category
+            ]
+            logger.info(f"🔍 After category filter '{category}': {len(filtered_transactions)} transactions")
+        
+        # Also filter parked_measures if department filter is applied (this is what your components need)
+        filtered_parked_measures = parked_measures
+        if department:
+            filtered_parked_measures = [
+                measure for measure in parked_measures 
+                if measure.get('department') == department
+            ]
+            logger.info(f"🔍 Filtered parked measures for '{department}': {len(filtered_parked_measures)} measures")
+        
+        # Build comprehensive response based on your processing code structure
+        response_data = {
+            # Main transactions array (filtered)
+            "transactions": filtered_transactions,
+            
+            # Separate arrays for specific use cases (important for your components)
+            "parked_measures": filtered_parked_measures,
+            "direct_costs": direct_costs,
+            "booked_measures": booked_measures,
+            "outliers": outliers,
+            "placeholders": placeholders,
+            
+            # Statistics from processing
+            "statistics": statistics,
+            
+            # Summary information
+            "summary": {
+                "total_transactions": len(all_transactions),
+                "filtered_transactions": len(filtered_transactions),
+                "by_category": {
+                    "DIRECT_COST": len([tx for tx in all_transactions if tx.get('category') == 'DIRECT_COST']),
+                    "BOOKED_MEASURE": len([tx for tx in all_transactions if tx.get('category') == 'BOOKED_MEASURE']),
+                    "PARKED_MEASURE": len([tx for tx in all_transactions if tx.get('category') == 'PARKED_MEASURE']),
+                    "UNASSIGNED_MEASURE": len([tx for tx in all_transactions if tx.get('category') == 'UNASSIGNED_MEASURE']),
+                    "OUTLIER": len([tx for tx in all_transactions if tx.get('category') == 'OUTLIER'])
+                },
+                "by_budget_impact": {
+                    "Booked": len([tx for tx in all_transactions if tx.get('budget_impact') == 'Booked']),
+                    "Reserved": len([tx for tx in all_transactions if tx.get('budget_impact') == 'Reserved']),
+                    "None": len([tx for tx in all_transactions if tx.get('budget_impact') == 'None'])
+                },
+                "by_location_type": {
+                    "Floor": len([tx for tx in all_transactions if tx.get('location_type') == 'Floor']),
+                    "HQ": len([tx for tx in all_transactions if tx.get('location_type') == 'HQ']),
+                    "Unknown": len([tx for tx in all_transactions if tx.get('location_type') == 'Unknown'])
+                }
+            },
+            
+            # Filters that were applied
+            "filters_applied": {
+                "department": department,
+                "region": region,
+                "status": status,
+                "category": category
+            },
+            
+            # Processing metadata
+            "processing_date": transactions_data.get('processing_date'),
+            "data_source": "Azure SQL Database"
+        }
+        
+        logger.info(f"🎯 Returning {len(filtered_transactions)} transactions with {len(filtered_parked_measures)} parked measures")
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        logger.error(f"❌ Error in /api/transactions: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            "transactions": [],
+            "parked_measures": [],
+            "direct_costs": [],
+            "booked_measures": [],
+            "error": "Failed to fetch transactions",
+            "message": str(e)
+        }), 500
+
+@app.route('/api/transactions-fixed', methods=['GET'])
+def get_transactions_fixed():
+    """
+    FIXED VERSION: Get transactions with proper parsing and debugging
+    """
+    try:
+        logger.info("🔍 Starting FIXED /api/transactions request...")
         
         # Get query parameters
         department = request.args.get('department')
@@ -697,61 +467,138 @@ def get_transactions():
         logger.info(f"🔍 Filters: department={department}, region={region}, status={status}, category={category}")
         
         # Get raw data from database
-        raw_transactions_data = get_processed_data_from_database("transactions")
-        logger.info(f"✅ Raw data loaded: {type(raw_transactions_data)}")
-        
-        if not raw_transactions_data:
-            return jsonify({
-                "error": "No transaction data found in database"
-            }), 404
-        
-        # ✅ WORKING FIX: Use the new parsing function
-        parsed_data = safe_parse_json_fields_CORRECT_FIX(raw_transactions_data.copy())
-        logger.info("✅ Data parsed with WORKING function")
-        
-        # Extract arrays
-        all_transactions = parsed_data.get('transactions', [])
-        parked_measures = parsed_data.get('parked_measures', [])
-        direct_costs = parsed_data.get('direct_costs', [])
-        booked_measures = parsed_data.get('booked_measures', [])
-        outliers = parsed_data.get('outliers', [])
-        placeholders = parsed_data.get('placeholders', [])
-        statistics = parsed_data.get('statistics', {})
-        
-        logger.info(f"📊 WORKING FIX RESULTS:")
-        logger.info(f"   - all_transactions: {len(all_transactions)}")
-        logger.info(f"   - booked_measures: {len(booked_measures)}")
-        logger.info(f"   - parked_measures: {len(parked_measures)}")
-        logger.info(f"   - direct_costs: {len(direct_costs)}")
-        logger.info(f"   - outliers: {len(outliers)}")
-        
-        # ✅ If main transactions array is empty but components exist, rebuild it
-        if len(all_transactions) == 0 and (len(direct_costs) > 0 or len(booked_measures) > 0 or len(parked_measures) > 0):
-            logger.info("🔧 Rebuilding main transactions array...")
+        try:
+            raw_transactions_data = get_processed_data_from_database("transactions")
+            logger.info(f"✅ Raw data type: {type(raw_transactions_data)}")
             
+            if isinstance(raw_transactions_data, dict):
+                logger.info(f"✅ Raw data keys: {list(raw_transactions_data.keys())}")
+                
+                # Check the transactions field specifically
+                trans_field = raw_transactions_data.get('transactions')
+                logger.info(f"✅ Transactions field type: {type(trans_field)}")
+                
+                if isinstance(trans_field, str):
+                    logger.info(f"✅ Transactions field is string, first 200 chars: {trans_field[:200]}...")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to load raw transactions: {str(e)}")
+            return jsonify({
+                "error": "Could not load raw transactions data",
+                "message": str(e)
+            }), 500
+        
+        # Parse the data using FIXED function
+        try:
+            parsed_transactions_data = safe_parse_json_fields(raw_transactions_data.copy())
+            logger.info(f"✅ Parsed data successfully")
+            
+            # Validate parsing worked
+            transactions = parsed_transactions_data.get('transactions', [])
+            logger.info(f"✅ Parsed transactions type: {type(transactions)}")
+            logger.info(f"✅ Parsed transactions count: {len(transactions) if isinstance(transactions, list) else 'NOT A LIST'}")
+            
+            if isinstance(transactions, list) and len(transactions) > 0:
+                sample_tx = transactions[0]
+                logger.info(f"✅ Sample transaction type: {type(sample_tx)}")
+                if isinstance(sample_tx, dict):
+                    logger.info(f"✅ Sample transaction keys: {list(sample_tx.keys())}")
+                    logger.info(f"✅ Sample category: {sample_tx.get('category', 'NO_CATEGORY')}")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to parse transactions: {str(e)}")
+            return jsonify({
+                "error": "Could not parse transactions data",
+                "message": str(e),
+                "raw_data_type": type(raw_transactions_data).__name__
+            }), 500
+        
+        # ✅ CRITICAL FIX: Extract arrays with proper parsing for ALL arrays
+        all_transactions = parsed_transactions_data.get('transactions', [])
+        parked_measures = parsed_transactions_data.get('parked_measures', [])
+        direct_costs = parsed_transactions_data.get('direct_costs', [])
+        booked_measures = parsed_transactions_data.get('booked_measures', [])
+        outliers = parsed_transactions_data.get('outliers', [])
+        placeholders = parsed_transactions_data.get('placeholders', [])
+        statistics = parsed_transactions_data.get('statistics', {})
+
+        # ✅ STEP 1: Parse string representations if needed for ALL arrays
+        def ensure_list(data, array_name):
+            if isinstance(data, str):
+                try:
+                    parsed = parse_python_string_to_list(data)
+                    logger.info(f"✅ Parsed {array_name} from string: {len(parsed)} items")
+                    return parsed
+                except Exception as e:
+                    logger.error(f"❌ Failed to parse {array_name}: {e}")
+                    return []
+            elif isinstance(data, list):
+                logger.info(f"✅ {array_name} already a list: {len(data)} items")
+                return data
+            else:
+                logger.warning(f"⚠️ {array_name} is unexpected type: {type(data)}")
+                return []
+
+        # Apply parsing to ALL arrays
+        all_transactions = ensure_list(all_transactions, "transactions")
+        parked_measures = ensure_list(parked_measures, "parked_measures")
+        direct_costs = ensure_list(direct_costs, "direct_costs")
+        booked_measures = ensure_list(booked_measures, "booked_measures")
+        outliers = ensure_list(outliers, "outliers")
+        placeholders = ensure_list(placeholders, "placeholders")
+
+        # ✅ STEP 2: If transactions array is STILL empty, rebuild it from components
+        if len(all_transactions) == 0 and (len(direct_costs) > 0 or len(booked_measures) > 0 or len(parked_measures) > 0):
+            logger.info("🔧 FIXING: transactions array is empty, rebuilding from component arrays...")
+            
+            # Rebuild the complete transactions array from components
             all_transactions = []
             
+            # Add direct costs
             if direct_costs:
                 all_transactions.extend(direct_costs)
-                logger.info(f"✅ Added {len(direct_costs)} direct costs")
+                logger.info(f"✅ Added {len(direct_costs)} direct costs to transactions")
             
+            # Add booked measures  
             if booked_measures:
                 all_transactions.extend(booked_measures)
-                logger.info(f"✅ Added {len(booked_measures)} booked measures")
+                logger.info(f"✅ Added {len(booked_measures)} booked measures to transactions")
             
+            # Add parked measures
             if parked_measures:
                 all_transactions.extend(parked_measures)
-                logger.info(f"✅ Added {len(parked_measures)} parked measures")
+                logger.info(f"✅ Added {len(parked_measures)} parked measures to transactions")
             
+            # Add outliers if they exist
             if outliers:
                 all_transactions.extend(outliers)
-                logger.info(f"✅ Added {len(outliers)} outliers")
+                logger.info(f"✅ Added {len(outliers)} outliers to transactions")
             
+            # Add placeholders if they exist
             if placeholders:
                 all_transactions.extend(placeholders)
-                logger.info(f"✅ Added {len(placeholders)} placeholders")
+                logger.info(f"✅ Added {len(placeholders)} placeholders to transactions")
             
-            logger.info(f"🔧 Rebuilt transactions array: {len(all_transactions)} total")
+            logger.info(f"🔧 FIXED: Rebuilt transactions array with {len(all_transactions)} total transactions")
+
+        logger.info(f"📊 FINAL COUNTS: all={len(all_transactions)}, parked={len(parked_measures)}, direct={len(direct_costs)}, booked={len(booked_measures)}, outliers={len(outliers)}")
+
+        # ✅ STEP 3: Validate the arrays contain correct data types
+        def validate_array_content(array, array_name):
+            if len(array) > 0:
+                sample = array[0]
+                if isinstance(sample, dict):
+                    logger.info(f"✅ {array_name} contains proper dict objects")
+                    if 'category' in sample:
+                        categories = list(set([item.get('category', 'NO_CATEGORY') for item in array[:100]]))  # Check first 100
+                        logger.info(f"✅ {array_name} categories: {categories}")
+                else:
+                    logger.warning(f"⚠️ {array_name} contains {type(sample)} instead of dict")
+
+        validate_array_content(all_transactions, "all_transactions")
+        validate_array_content(parked_measures, "parked_measures") 
+        validate_array_content(direct_costs, "direct_costs")
+        validate_array_content(booked_measures, "booked_measures")
         
         # Apply filters
         filtered_transactions = all_transactions
@@ -772,68 +619,57 @@ def get_transactions():
             filtered_transactions = [tx for tx in filtered_transactions if tx.get('category') == category]
             logger.info(f"🔍 After category filter: {len(filtered_transactions)} transactions")
         
-        # Filter other arrays by department if specified
+        # Filter parked measures
         filtered_parked_measures = parked_measures
-        filtered_booked_measures = booked_measures
-        filtered_direct_costs = direct_costs
-        
         if department:
-            filtered_parked_measures = [m for m in parked_measures if m.get('department') == department]
-            filtered_booked_measures = [m for m in booked_measures if m.get('department') == department]
-            filtered_direct_costs = [m for m in direct_costs if m.get('department') == department]
+            filtered_parked_measures = [measure for measure in parked_measures if measure.get('department') == department]
         
         # Build response
         response_data = {
             "transactions": filtered_transactions,
             "parked_measures": filtered_parked_measures,
-            "direct_costs": filtered_direct_costs,
-            "booked_measures": filtered_booked_measures,
+            "direct_costs": direct_costs,
+            "booked_measures": booked_measures,
             "outliers": outliers,
             "placeholders": placeholders,
             "statistics": statistics,
             "summary": {
                 "total_transactions": len(all_transactions),
                 "filtered_transactions": len(filtered_transactions),
+                "parsing_success": True,
+                "raw_data_type": type(raw_transactions_data).__name__,
                 "by_category": {
+                    "DIRECT_COST": len([tx for tx in all_transactions if tx.get('category') == 'DIRECT_COST']),
                     "BOOKED_MEASURE": len([tx for tx in all_transactions if tx.get('category') == 'BOOKED_MEASURE']),
                     "PARKED_MEASURE": len([tx for tx in all_transactions if tx.get('category') == 'PARKED_MEASURE']),
                     "UNASSIGNED_MEASURE": len([tx for tx in all_transactions if tx.get('category') == 'UNASSIGNED_MEASURE']),
-                    "DIRECT_COST": len([tx for tx in all_transactions if tx.get('category') == 'DIRECT_COST']),
                     "OUTLIER": len([tx for tx in all_transactions if tx.get('category') == 'OUTLIER'])
-                },
-                "array_counts": {
-                    "booked_measures": len(booked_measures),
-                    "parked_measures": len(parked_measures),
-                    "direct_costs": len(direct_costs),
-                    "outliers": len(outliers)
                 }
-            },
-            "working_fix_info": {
-                "method": "WORKING_FIX",
-                "parsing_success": True,
-                "arrays_parsed_correctly": len(booked_measures) > 0 and len(parked_measures) > 0,
-                "data_source": "Azure SQL Database with proper string parsing"
             },
             "filters_applied": {
                 "department": department,
                 "region": region,
                 "status": status,
                 "category": category
+            },
+            "debug_info": {
+                "endpoint": "FIXED VERSION",
+                "parsing_method": "safe_parse_json_fields_FIXED",
+                "arrays_rebuilt": len(all_transactions) > 0
             }
         }
         
-        logger.info(f"🎯 WORKING FIX returning: {len(filtered_transactions)} transactions, {len(filtered_booked_measures)} booked, {len(filtered_parked_measures)} parked")
+        logger.info(f"🎯 Returning FIXED response with {len(filtered_transactions)} transactions")
         
         return jsonify(response_data)
         
     except Exception as e:
-        logger.error(f"❌ Error in WORKING FIX endpoint: {str(e)}")
+        logger.error(f"❌ Error in FIXED transactions endpoint: {str(e)}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({
-            "error": "Failed in working fix endpoint",
-            "message": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Failed to fetch transactions (FIXED version)",
+            "message": str(e)
         }), 500
 
 @app.route('/api/assign-measure', methods=['POST'])
@@ -872,7 +708,7 @@ def assign_measure():
         
         # Get the current transactions from database
         transactions = get_processed_data_from_database("transactions")
-        transactions = safe_parse_json_fields_WORKING(transactions) 
+        transactions = safe_parse_json_fields(transactions) 
         
         # Find the measure to update
         measure_found = False
@@ -1051,6 +887,59 @@ def database_status():
             "timestamp": datetime.now().isoformat()
         }), 500
 
+@app.route('/api/debug-data', methods=['GET'])
+def debug_data():
+    """Debug endpoint to see what's actually in the database"""
+    try:
+        logger.info("🔍 DEBUG: Starting debug data check...")
+        
+        # Check what's actually in the database for each table
+        debug_info = {}
+        
+        # Check frontend_departments
+        try:
+            departments_data = get_processed_data_from_database("frontend_departments")
+            debug_info['frontend_departments'] = {
+                'exists': departments_data is not None,
+                'type': type(departments_data).__name__,
+                'keys': list(departments_data.keys()) if isinstance(departments_data, dict) else 'N/A'
+            }
+        except Exception as e:
+            debug_info['frontend_departments'] = {'error': str(e)}
+        
+        # Check frontend_regions  
+        try:
+            regions_data = get_processed_data_from_database("frontend_regions")
+            debug_info['frontend_regions'] = {
+                'exists': regions_data is not None,
+                'type': type(regions_data).__name__,
+                'keys': list(regions_data.keys()) if isinstance(regions_data, dict) else 'N/A'
+            }
+        except Exception as e:
+            debug_info['frontend_regions'] = {'error': str(e)}
+        
+        # Check transactions
+        try:
+            transactions_data = get_processed_data_from_database("transactions")
+            debug_info['transactions'] = {
+                'exists': transactions_data is not None,
+                'type': type(transactions_data).__name__,
+                'has_transactions': 'transactions' in transactions_data if isinstance(transactions_data, dict) else False,
+                'keys': list(transactions_data.keys()) if isinstance(transactions_data, dict) else 'N/A'
+            }
+        except Exception as e:
+            debug_info['transactions'] = {'error': str(e)}
+        
+        return jsonify({
+            'debug_info': debug_info,
+            'timestamp': datetime.now().isoformat(),
+            'status': 'debug_complete'
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Debug endpoint error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint for database version"""
@@ -1075,7 +964,7 @@ def health_check():
         
         return jsonify({
             "status": status,
-            "version": "2.1.0 (Database + Fixed Parsing)",
+            "version": "2.0.0 (Database)",
             "database": {
                 "connected": db_connected,
                 "password_configured": db_password_set,
@@ -1143,7 +1032,7 @@ def upload_file():
     }), 200
 
 if __name__ == '__main__':
-    # Check if database password is set before startingg
+    # Check if database password is set before starting
     if not os.getenv("DB_PASSWORD"):
         print("❌ WARNING: DB_PASSWORD environment variable not set!")
         print("The API will start but database operations will fail.")
