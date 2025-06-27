@@ -67,9 +67,9 @@ def parse_python_string_to_list(python_string):
 
 # Replace with this ROBUST fix that shows each step:
 
-def safe_parse_json_fields_ROBUST(data):
+def safe_parse_json_fields_FINAL(data):
     """
-    ROBUST FIX: Step-by-step approach with detailed logging
+    FINAL WORKING FIX: Properly handles datetime.date objects with correct eval approach
     """
     if not isinstance(data, dict):
         return data
@@ -100,100 +100,75 @@ def safe_parse_json_fields_ROBUST(data):
                     data[key] = parsed_value
                     logger.info(f"✅ AST parsed {key}: {len(parsed_value)} items")
                     continue
-                except (ValueError, SyntaxError) as ast_error:
-                    logger.info(f"❌ AST failed for {key}: {str(ast_error)[:100]}")
+                except (ValueError, SyntaxError):
+                    logger.info(f"❌ AST failed for {key}, contains function calls")
                 
-                # Method 3: STEP-BY-STEP datetime fixing
+                # Method 3: WORKING EVAL APPROACH - Create proper namespace
                 try:
-                    import re
-                    fixed_value = value
+                    logger.info(f"🔧 Using eval approach for {key}")
                     
-                    logger.info(f"🔧 Starting step-by-step fix for {key}")
-                    
-                    # Count how many datetime.date patterns we find
-                    date_matches = re.findall(r'datetime\.date\(\d+,\s*\d+,\s*\d+\)', fixed_value)
-                    logger.info(f"🔧 Found {len(date_matches)} datetime.date patterns")
-                    
-                    # Step 1: Replace datetime.date patterns
-                    original_length = len(fixed_value)
-                    date_pattern = r'datetime\.date\((\d+),\s*(\d+),\s*(\d+)\)'
-                    
-                    def date_replacer(match):
-                        year, month, day = match.groups()
-                        replacement = f'"{year}-{month:0>2}-{day:0>2}"'
-                        logger.info(f"🔧 Replacing {match.group(0)} with {replacement}")
-                        return replacement
-                    
-                    fixed_value = re.sub(date_pattern, date_replacer, fixed_value)
-                    logger.info(f"🔧 After date replacement: length changed from {original_length} to {len(fixed_value)}")
-                    
-                    # Step 2: Check if there are any remaining problematic patterns
-                    remaining_datetime = re.findall(r'datetime\.[a-zA-Z]+\([^)]+\)', fixed_value)
-                    if remaining_datetime:
-                        logger.info(f"🔧 Remaining datetime patterns: {remaining_datetime[:5]}")
-                        
-                        # Replace any remaining datetime patterns
-                        for pattern in remaining_datetime:
-                            fixed_value = fixed_value.replace(pattern, f'"{pattern}"')
-                    
-                    # Step 3: Try parsing after fixes
-                    logger.info(f"🔧 Attempting to parse fixed value...")
-                    try:
-                        parsed_value = ast.literal_eval(fixed_value)
-                        data[key] = parsed_value
-                        logger.info(f"✅ Step-by-step fix SUCCESS for {key}: {len(parsed_value)} items")
-                        continue
-                    except Exception as parse_error:
-                        logger.error(f"❌ Parse failed even after fixes: {str(parse_error)[:200]}")
-                        # Show a sample of what we're trying to parse
-                        sample = fixed_value[:1000]
-                        logger.error(f"Sample of fixed data: {sample}")
-                        
-                except Exception as step_error:
-                    logger.error(f"❌ Step-by-step method failed: {str(step_error)[:200]}")
-                
-                # Method 4: ULTIMATE FALLBACK - Character by character approach
-                try:
-                    logger.info(f"🔧 Trying ultimate fallback for {key}")
-                    
-                    # Let's try a completely different approach - use eval with VERY controlled environment
-                    from datetime import date, datetime
+                    # Import what we need
+                    from datetime import date, datetime, time
                     from decimal import Decimal
+                    import uuid
                     
-                    # Create the safest possible eval environment
-                    safe_globals = {
-                        '__builtins__': {},
-                        'datetime': {
-                            'date': date,
-                            'datetime': datetime
-                        }
+                    # Create a namespace that includes datetime.date as accessible
+                    namespace = {
+                        '__builtins__': {
+                            # Allow basic built-ins needed for list/dict construction
+                            'list': list,
+                            'dict': dict,
+                            'str': str,
+                            'int': int,
+                            'float': float,
+                            'bool': bool,
+                            'None': None,
+                            'True': True,
+                            'False': False,
+                        },
+                        # Make datetime classes available
+                        'datetime': datetime,
+                        'date': date,
+                        'time': time,
+                        'Decimal': Decimal,
+                        'UUID': uuid.UUID if hasattr(uuid, 'UUID') else None,
                     }
                     
-                    # Try to evaluate with this controlled environment
-                    parsed_value = eval(value, safe_globals)
+                    # CRITICAL: Also add the module-style access
+                    datetime_module = type('datetime', (), {
+                        'date': date,
+                        'datetime': datetime,
+                        'time': time
+                    })
+                    namespace['datetime'] = datetime_module
                     
-                    # Convert to JSON-serializable format
-                    def convert_to_json_safe(obj):
-                        if isinstance(obj, date):
+                    # Execute the string as Python code
+                    parsed_value = eval(value, namespace)
+                    
+                    # Convert result to JSON-serializable format
+                    def make_json_serializable(obj):
+                        if isinstance(obj, (date, datetime)):
                             return obj.isoformat()
-                        elif isinstance(obj, datetime):
+                        elif isinstance(obj, time):
                             return obj.isoformat()
                         elif isinstance(obj, Decimal):
                             return float(obj)
+                        elif hasattr(obj, '__str__') and not isinstance(obj, (str, int, float, bool, type(None))):
+                            return str(obj)
                         elif isinstance(obj, list):
-                            return [convert_to_json_safe(item) for item in obj]
+                            return [make_json_serializable(item) for item in obj]
                         elif isinstance(obj, dict):
-                            return {k: convert_to_json_safe(v) for k, v in obj.items()}
+                            return {k: make_json_serializable(v) for k, v in obj.items()}
                         else:
                             return obj
                     
-                    safe_value = convert_to_json_safe(parsed_value)
-                    data[key] = safe_value
-                    logger.info(f"✅ Ultimate fallback SUCCESS for {key}: {len(safe_value)} items")
+                    json_safe_value = make_json_serializable(parsed_value)
+                    data[key] = json_safe_value
+                    logger.info(f"✅ Eval approach SUCCESS for {key}: {len(json_safe_value)} items")
                     continue
                     
-                except Exception as ultimate_error:
-                    logger.error(f"❌ Ultimate fallback failed: {str(ultimate_error)[:200]}")
+                except Exception as eval_error:
+                    logger.error(f"❌ Eval approach failed for {key}: {str(eval_error)[:300]}")
                 
                 # If everything fails
                 logger.error(f"💥 ALL METHODS FAILED for {key}")
@@ -208,13 +183,15 @@ def safe_parse_json_fields_ROBUST(data):
     return data
 
 
-# Enhanced test endpoint to see exactly what's happening:
-@app.route('/api/test-robust-fix', methods=['GET'])
-def test_robust_fix():
+# Fixed test endpoints with proper imports:
+@app.route('/api/test-final-fix', methods=['GET'])
+def test_final_fix():
     """
-    Test the robust fix with detailed step-by-step logging
+    Test the final working fix
     """
     try:
+        import re  # Add the missing import
+        
         # Get raw data
         raw_data = get_processed_data_from_database("transactions")
         
@@ -223,9 +200,8 @@ def test_robust_fix():
         
         booked_raw = raw_data['booked_measures']
         
-        # Test on a SMALL sample first to see what's happening
-        # Take just the first few hundred characters to isolate the issue
-        small_sample = booked_raw[:2000]  # First 2000 characters
+        # Test on a small sample
+        small_sample = booked_raw[:2000]
         
         # Find the end of the first complete dictionary
         brace_count = 0
@@ -240,24 +216,23 @@ def test_robust_fix():
                     break
         
         if end_pos > 0:
-            # Extract just the first item plus array brackets
             first_item = '[' + small_sample[1:end_pos] + ']'
         else:
             first_item = small_sample
         
-        # Test the robust parsing on this small sample
+        # Test the final parsing
         test_data = {'booked_measures': first_item}
-        parsed_test_data = safe_parse_json_fields_ROBUST(test_data)
+        parsed_test_data = safe_parse_json_fields_FINAL(test_data)
         
         booked_measures = parsed_test_data['booked_measures']
         
         result = {
             'parsing_success': isinstance(booked_measures, list),
             'parsed_count': len(booked_measures) if isinstance(booked_measures, list) else 0,
-            'sample_input': first_item,
+            'sample_input_length': len(first_item),
             'sample_output': booked_measures[0] if isinstance(booked_measures, list) and len(booked_measures) > 0 else None,
-            'input_length': len(first_item),
-            'datetime_patterns_found': len(re.findall(r'datetime\.date\(\d+,\s*\d+,\s*\d+\)', first_item))
+            'datetime_patterns_found': len(re.findall(r'datetime\.date\(\d+,\s*\d+,\s*\d+\)', first_item)),
+            'input_preview': first_item[:500]  # Show first 500 chars of input
         }
         
         return jsonify(result)
@@ -270,6 +245,34 @@ def test_robust_fix():
         }), 500
 
 
+@app.route('/api/test-simple-final', methods=['GET'])
+def test_simple_final():
+    """
+    Test with simple datetime case using final fix
+    """
+    try:
+        # Simple test case
+        test_string = '''[{'id': 1, 'name': 'test', 'date': datetime.date(2025, 1, 27), 'amount': 123.45}]'''
+        
+        # Test our final parsing function
+        test_data = {'test_field': test_string}
+        parsed_data = safe_parse_json_fields_FINAL(test_data)
+        
+        return jsonify({
+            'input': test_string,
+            'output': parsed_data['test_field'],
+            'success': isinstance(parsed_data['test_field'], list) and len(parsed_data['test_field']) > 0,
+            'count': len(parsed_data['test_field']) if isinstance(parsed_data['test_field'], list) else 0,
+            'parsed_date': parsed_data['test_field'][0]['date'] if (isinstance(parsed_data['test_field'], list) and len(parsed_data['test_field']) > 0) else None
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+    
 # ALSO add this simple manual test:
 @app.route('/api/test-simple-datetime', methods=['GET'])
 def test_simple_datetime():
