@@ -65,14 +65,13 @@ def parse_python_string_to_list(python_string):
         logger.error(f"Failed to parse Python string: {str(e)}")
         return []
 
-def safe_parse_json_fields_ENHANCED(data):
+def safe_parse_json_fields_TARGETED_FIX(data):
     """
-    ENHANCED VERSION: Handles complex Python string representations with better error handling
+    TARGETED FIX: Handles datetime() calls and other function calls in Python strings
     """
     if not isinstance(data, dict):
         return data
     
-    # These keys are stored as Python string representations in your database
     keys_to_parse = ['transactions', 'parked_measures', 'direct_costs', 'booked_measures', 'outliers', 'placeholders']
     
     for key in keys_to_parse:
@@ -80,123 +79,167 @@ def safe_parse_json_fields_ENHANCED(data):
             value = data[key]
             
             if isinstance(value, str) and len(value) > 0:
-                logger.info(f"🔍 Parsing {key}: length={len(value)}, starts_with='{value[:50]}...'")
+                logger.info(f"🔍 Parsing {key}: length={len(value)}")
                 
                 # Method 1: Try JSON parsing first (fastest)
                 try:
                     import json
                     parsed_value = json.loads(value)
                     data[key] = parsed_value
-                    logger.info(f"✅ JSON parsed {key}: {len(parsed_value) if isinstance(parsed_value, list) else 'not a list'} items")
+                    logger.info(f"✅ JSON parsed {key}: {len(parsed_value)} items")
                     continue
-                except json.JSONDecodeError as json_err:
-                    logger.info(f"❌ JSON failed for {key}: {str(json_err)[:100]}")
+                except json.JSONDecodeError:
+                    pass
                 
-                # Method 2: Try AST literal eval (for Python string representations)
+                # Method 2: Try AST literal eval (works for direct_costs)
                 try:
                     import ast
                     parsed_value = ast.literal_eval(value)
                     data[key] = parsed_value
-                    logger.info(f"✅ AST parsed {key}: {len(parsed_value) if isinstance(parsed_value, list) else 'not a list'} items")
+                    logger.info(f"✅ AST parsed {key}: {len(parsed_value)} items")
                     continue
-                except (ValueError, SyntaxError) as ast_error:
-                    logger.error(f"❌ AST failed for {key}: {str(ast_error)[:200]}")
-                    logger.error(f"Sample problematic data: {value[:500]}")
+                except (ValueError, SyntaxError):
+                    logger.info(f"❌ AST failed for {key}, trying datetime fix...")
                 
-                # Method 3: Enhanced manual fix for complex Python representations
+                # Method 3: TARGETED FIX for datetime and function calls
                 try:
-                    logger.info(f"🔧 Attempting enhanced manual fix for {key}")
-                    
-                    # Step 1: Basic replacements
-                    fixed_value = value
-                    
-                    # Replace Python boolean/null values
-                    fixed_value = fixed_value.replace('True', 'true')
-                    fixed_value = fixed_value.replace('False', 'false')
-                    fixed_value = fixed_value.replace('None', 'null')
-                    
-                    # Step 2: Handle single quotes more carefully
-                    # This is tricky because we need to replace ' with " but not break strings that contain apostrophes
                     import re
                     
-                    # Replace single quotes that are used as string delimiters (not apostrophes within strings)
-                    # This regex looks for single quotes that are likely string delimiters
-                    fixed_value = re.sub(r"'([^']*)':", r'"\1":', fixed_value)  # Replace keys
-                    fixed_value = re.sub(r":\s*'([^']*)'", r': "\1"', fixed_value)  # Replace values
-                    fixed_value = re.sub(r"'([^']*)',", r'"\1",', fixed_value)  # Replace in arrays
-                    fixed_value = re.sub(r"\['([^']*)'", r'["\1"', fixed_value)  # Replace array start
-                    fixed_value = re.sub(r"'([^']*)'\]", r'"\1"]', fixed_value)  # Replace array end
+                    # Create a copy to work with
+                    fixed_value = value
                     
-                    # Step 3: Try parsing the fixed value
-                    parsed_value = json.loads(fixed_value)
+                    # Fix 1: Replace datetime() function calls with string representations
+                    # Pattern: datetime(2025, 6, 11, 12, 9, 17, 776666) -> "2025-06-11 12:09:17.776666"
+                    datetime_pattern = r'datetime\((\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\)'
+                    def datetime_replacer(match):
+                        year, month, day, hour, minute, second, microsecond = match.groups()
+                        return f'"{year}-{month:0>2}-{day:0>2} {hour:0>2}:{minute:0>2}:{second:0>2}.{microsecond}"'
+                    
+                    fixed_value = re.sub(datetime_pattern, datetime_replacer, fixed_value)
+                    
+                    # Fix 2: Replace other common function calls that might appear
+                    # Replace Decimal('123.45') with 123.45
+                    decimal_pattern = r"Decimal\('([^']+)'\)"
+                    fixed_value = re.sub(decimal_pattern, r'\1', fixed_value)
+                    
+                    # Fix 3: Replace any remaining function calls with their string representation
+                    # This is a more general pattern for function_name(...) -> "function_name(...)"
+                    function_pattern = r'([a-zA-Z_][a-zA-Z0-9_]*)\([^)]*\)'
+                    # Only replace if it's not already in quotes
+                    def function_replacer(match):
+                        full_match = match.group(0)
+                        # Check if this function call is already inside quotes
+                        return f'"{full_match}"'
+                    
+                    # Be more careful with this replacement - only replace specific known problematic functions
+                    problematic_functions = ['datetime', 'Decimal', 'UUID', 'ObjectId']
+                    for func_name in problematic_functions:
+                        pattern = f'{func_name}\\([^)]*\\)'
+                        fixed_value = re.sub(pattern, lambda m: f'"{m.group(0)}"', fixed_value)
+                    
+                    # Try parsing the fixed value
+                    parsed_value = ast.literal_eval(fixed_value)
                     data[key] = parsed_value
-                    logger.info(f"✅ Enhanced manual fix parsed {key}: {len(parsed_value) if isinstance(parsed_value, list) else 'not a list'} items")
+                    logger.info(f"✅ Datetime fix parsed {key}: {len(parsed_value)} items")
                     continue
                     
-                except Exception as manual_error:
-                    logger.error(f"❌ Enhanced manual fix failed for {key}: {str(manual_error)[:200]}")
+                except Exception as datetime_error:
+                    logger.error(f"❌ Datetime fix failed for {key}: {str(datetime_error)[:200]}")
                 
-                # Method 4: Last resort - try to use eval (dangerous but for debugging)
+                # Method 4: Last resort - controlled eval with limited scope
                 try:
-                    logger.warning(f"⚠️ Using eval as last resort for {key}")
-                    parsed_value = eval(value)
-                    data[key] = parsed_value
-                    logger.info(f"⚠️ EVAL parsed {key}: {len(parsed_value) if isinstance(parsed_value, list) else 'not a list'} items")
+                    logger.warning(f"⚠️ Using controlled eval for {key}")
+                    
+                    # Create a safe evaluation environment
+                    from datetime import datetime
+                    from decimal import Decimal
+                    
+                    safe_dict = {
+                        'datetime': datetime,
+                        'Decimal': Decimal,
+                        '__builtins__': {},
+                    }
+                    
+                    parsed_value = eval(value, safe_dict)
+                    
+                    # Convert the result to JSON-serializable format
+                    def make_serializable(obj):
+                        if hasattr(obj, 'isoformat'):  # datetime objects
+                            return obj.isoformat()
+                        elif hasattr(obj, '__str__') and not isinstance(obj, (str, int, float, bool, type(None))):
+                            return str(obj)
+                        elif isinstance(obj, list):
+                            return [make_serializable(item) for item in obj]
+                        elif isinstance(obj, dict):
+                            return {k: make_serializable(v) for k, v in obj.items()}
+                        else:
+                            return obj
+                    
+                    serializable_value = make_serializable(parsed_value)
+                    data[key] = serializable_value
+                    logger.info(f"✅ Controlled eval parsed {key}: {len(serializable_value)} items")
                     continue
+                    
                 except Exception as eval_error:
-                    logger.error(f"❌ Even eval failed for {key}: {str(eval_error)[:200]}")
+                    logger.error(f"❌ Controlled eval failed for {key}: {str(eval_error)[:200]}")
                 
-                # Method 5: Final fallback - try chunk-by-chunk parsing for very large strings
-                try:
-                    if len(value) > 100000:  # If it's a very large string
-                        logger.info(f"🔧 Large string detected for {key}, attempting chunk parsing")
-                        
-                        # Look for list pattern at the start
-                        if value.strip().startswith('['):
-                            # Find the matching closing bracket
-                            bracket_count = 0
-                            end_pos = 0
-                            
-                            for i, char in enumerate(value):
-                                if char == '[':
-                                    bracket_count += 1
-                                elif char == ']':
-                                    bracket_count -= 1
-                                    if bracket_count == 0:
-                                        end_pos = i + 1
-                                        break
-                            
-                            if end_pos > 0:
-                                # Extract just the array part
-                                array_part = value[:end_pos]
-                                logger.info(f"🔧 Extracted array part for {key}: {len(array_part)} chars")
-                                
-                                # Try parsing just this part
-                                try:
-                                    parsed_value = ast.literal_eval(array_part)
-                                    data[key] = parsed_value
-                                    logger.info(f"✅ Chunk parsing worked for {key}: {len(parsed_value)} items")
-                                    continue
-                                except Exception as chunk_error:
-                                    logger.error(f"❌ Chunk parsing failed: {str(chunk_error)[:200]}")
-                
-                except Exception as chunk_method_error:
-                    logger.error(f"❌ Chunk method failed: {str(chunk_method_error)[:200]}")
-                
-                # If everything fails, log the failure and set empty array
-                logger.error(f"💥 ALL PARSING METHODS FAILED for {key}")
-                logger.error(f"Data characteristics: length={len(value)}, starts='{value[:100]}'")
+                # If everything fails, set empty array
+                logger.error(f"💥 ALL METHODS FAILED for {key}")
                 data[key] = []
                             
             elif isinstance(value, list):
-                # Already a list, keep it
                 logger.info(f"✅ {key} already a list: {len(value)} items")
-            
             else:
                 logger.warning(f"⚠️ {key} is unexpected type: {type(value)}")
                 data[key] = []
     
     return data
+
+
+# Update your main endpoint to use the new function:
+# In the get_transactions() function, change this line:
+# parsed_data = safe_parse_json_fields_TARGETED_FIX(raw_transactions_data.copy())
+
+# Also add this specific test endpoint:
+@app.route('/api/test-booked-parsing', methods=['GET'])
+def test_booked_parsing():
+    """
+    Test endpoint specifically for booked measures parsing
+    """
+    try:
+        # Get raw data
+        raw_data = get_processed_data_from_database("transactions")
+        
+        if 'booked_measures' not in raw_data:
+            return jsonify({'error': 'No booked_measures field found'})
+        
+        booked_raw = raw_data['booked_measures']
+        
+        if not isinstance(booked_raw, str):
+            return jsonify({'error': f'booked_measures is not a string, it is: {type(booked_raw)}'})
+        
+        # Show first 1000 characters for analysis
+        sample = booked_raw[:1000]
+        
+        # Try the targeted fix
+        test_data = {'booked_measures': booked_raw}
+        parsed_test_data = safe_parse_json_fields_TARGETED_FIX(test_data)
+        
+        result = {
+            'sample_data': sample,
+            'parsing_success': isinstance(parsed_test_data['booked_measures'], list),
+            'parsed_count': len(parsed_test_data['booked_measures']) if isinstance(parsed_test_data['booked_measures'], list) else 0,
+            'first_parsed_item': parsed_test_data['booked_measures'][0] if isinstance(parsed_test_data['booked_measures'], list) and len(parsed_test_data['booked_measures']) > 0 else None
+        }
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
 
 
 # Also add this debugging endpoint to help us see what's in the raw data:
