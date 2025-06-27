@@ -65,9 +65,9 @@ def parse_python_string_to_list(python_string):
         logger.error(f"Failed to parse Python string: {str(e)}")
         return []
 
-def safe_parse_json_fields_WORKING(data):
+def safe_parse_json_fields_ENHANCED(data):
     """
-    WORKING VERSION: Properly parse the string representations stored in database
+    ENHANCED VERSION: Handles complex Python string representations with better error handling
     """
     if not isinstance(data, dict):
         return data
@@ -80,45 +80,113 @@ def safe_parse_json_fields_WORKING(data):
             value = data[key]
             
             if isinstance(value, str) and len(value) > 0:
+                logger.info(f"🔍 Parsing {key}: length={len(value)}, starts_with='{value[:50]}...'")
+                
+                # Method 1: Try JSON parsing first (fastest)
                 try:
-                    # Method 1: Try JSON parsing first (fastest)
                     import json
                     parsed_value = json.loads(value)
                     data[key] = parsed_value
                     logger.info(f"✅ JSON parsed {key}: {len(parsed_value) if isinstance(parsed_value, list) else 'not a list'} items")
                     continue
+                except json.JSONDecodeError as json_err:
+                    logger.info(f"❌ JSON failed for {key}: {str(json_err)[:100]}")
+                
+                # Method 2: Try AST literal eval (for Python string representations)
+                try:
+                    import ast
+                    parsed_value = ast.literal_eval(value)
+                    data[key] = parsed_value
+                    logger.info(f"✅ AST parsed {key}: {len(parsed_value) if isinstance(parsed_value, list) else 'not a list'} items")
+                    continue
+                except (ValueError, SyntaxError) as ast_error:
+                    logger.error(f"❌ AST failed for {key}: {str(ast_error)[:200]}")
+                    logger.error(f"Sample problematic data: {value[:500]}")
+                
+                # Method 3: Enhanced manual fix for complex Python representations
+                try:
+                    logger.info(f"🔧 Attempting enhanced manual fix for {key}")
                     
-                except json.JSONDecodeError:
-                    logger.info(f"🔍 JSON failed for {key}, trying AST...")
+                    # Step 1: Basic replacements
+                    fixed_value = value
                     
-                    try:
-                        # Method 2: Try AST literal eval (for Python string representations)
-                        import ast
-                        parsed_value = ast.literal_eval(value)
-                        data[key] = parsed_value
-                        logger.info(f"✅ AST parsed {key}: {len(parsed_value) if isinstance(parsed_value, list) else 'not a list'} items")
-                        continue
+                    # Replace Python boolean/null values
+                    fixed_value = fixed_value.replace('True', 'true')
+                    fixed_value = fixed_value.replace('False', 'false')
+                    fixed_value = fixed_value.replace('None', 'null')
+                    
+                    # Step 2: Handle single quotes more carefully
+                    # This is tricky because we need to replace ' with " but not break strings that contain apostrophes
+                    import re
+                    
+                    # Replace single quotes that are used as string delimiters (not apostrophes within strings)
+                    # This regex looks for single quotes that are likely string delimiters
+                    fixed_value = re.sub(r"'([^']*)':", r'"\1":', fixed_value)  # Replace keys
+                    fixed_value = re.sub(r":\s*'([^']*)'", r': "\1"', fixed_value)  # Replace values
+                    fixed_value = re.sub(r"'([^']*)',", r'"\1",', fixed_value)  # Replace in arrays
+                    fixed_value = re.sub(r"\['([^']*)'", r'["\1"', fixed_value)  # Replace array start
+                    fixed_value = re.sub(r"'([^']*)'\]", r'"\1"]', fixed_value)  # Replace array end
+                    
+                    # Step 3: Try parsing the fixed value
+                    parsed_value = json.loads(fixed_value)
+                    data[key] = parsed_value
+                    logger.info(f"✅ Enhanced manual fix parsed {key}: {len(parsed_value) if isinstance(parsed_value, list) else 'not a list'} items")
+                    continue
+                    
+                except Exception as manual_error:
+                    logger.error(f"❌ Enhanced manual fix failed for {key}: {str(manual_error)[:200]}")
+                
+                # Method 4: Last resort - try to use eval (dangerous but for debugging)
+                try:
+                    logger.warning(f"⚠️ Using eval as last resort for {key}")
+                    parsed_value = eval(value)
+                    data[key] = parsed_value
+                    logger.info(f"⚠️ EVAL parsed {key}: {len(parsed_value) if isinstance(parsed_value, list) else 'not a list'} items")
+                    continue
+                except Exception as eval_error:
+                    logger.error(f"❌ Even eval failed for {key}: {str(eval_error)[:200]}")
+                
+                # Method 5: Final fallback - try chunk-by-chunk parsing for very large strings
+                try:
+                    if len(value) > 100000:  # If it's a very large string
+                        logger.info(f"🔧 Large string detected for {key}, attempting chunk parsing")
                         
-                    except (ValueError, SyntaxError) as ast_error:
-                        logger.error(f"❌ AST failed for {key}: {ast_error}")
-                        
-                        # Method 3: Manual fix for common issues
-                        try:
-                            # Fix common Python string representation issues
-                            fixed_value = value.replace("'", '"')  # Replace single quotes with double quotes
-                            fixed_value = fixed_value.replace('True', 'true')  # Fix boolean values
-                            fixed_value = fixed_value.replace('False', 'false')
-                            fixed_value = fixed_value.replace('None', 'null')
+                        # Look for list pattern at the start
+                        if value.strip().startswith('['):
+                            # Find the matching closing bracket
+                            bracket_count = 0
+                            end_pos = 0
                             
-                            parsed_value = json.loads(fixed_value)
-                            data[key] = parsed_value
-                            logger.info(f"✅ Manual fix parsed {key}: {len(parsed_value) if isinstance(parsed_value, list) else 'not a list'} items")
-                            continue
+                            for i, char in enumerate(value):
+                                if char == '[':
+                                    bracket_count += 1
+                                elif char == ']':
+                                    bracket_count -= 1
+                                    if bracket_count == 0:
+                                        end_pos = i + 1
+                                        break
                             
-                        except json.JSONDecodeError as manual_error:
-                            logger.error(f"❌ Manual fix failed for {key}: {manual_error}")
-                            logger.error(f"Sample data: {value[:200]}...")
-                            data[key] = []
+                            if end_pos > 0:
+                                # Extract just the array part
+                                array_part = value[:end_pos]
+                                logger.info(f"🔧 Extracted array part for {key}: {len(array_part)} chars")
+                                
+                                # Try parsing just this part
+                                try:
+                                    parsed_value = ast.literal_eval(array_part)
+                                    data[key] = parsed_value
+                                    logger.info(f"✅ Chunk parsing worked for {key}: {len(parsed_value)} items")
+                                    continue
+                                except Exception as chunk_error:
+                                    logger.error(f"❌ Chunk parsing failed: {str(chunk_error)[:200]}")
+                
+                except Exception as chunk_method_error:
+                    logger.error(f"❌ Chunk method failed: {str(chunk_method_error)[:200]}")
+                
+                # If everything fails, log the failure and set empty array
+                logger.error(f"💥 ALL PARSING METHODS FAILED for {key}")
+                logger.error(f"Data characteristics: length={len(value)}, starts='{value[:100]}'")
+                data[key] = []
                             
             elif isinstance(value, list):
                 # Already a list, keep it
@@ -129,6 +197,55 @@ def safe_parse_json_fields_WORKING(data):
                 data[key] = []
     
     return data
+
+
+# Also add this debugging endpoint to help us see what's in the raw data:
+@app.route('/api/debug-parsing', methods=['GET'])
+def debug_parsing():
+    """
+    Debug endpoint to see exactly what's happening with parsing
+    """
+    try:
+        # Get raw data
+        raw_data = get_processed_data_from_database("transactions")
+        
+        debug_info = {}
+        
+        # Check each field that should contain arrays
+        for key in ['booked_measures', 'parked_measures', 'direct_costs']:
+            if key in raw_data:
+                value = raw_data[key]
+                debug_info[key] = {
+                    'type': type(value).__name__,
+                    'length': len(value) if hasattr(value, '__len__') else 'N/A',
+                    'first_100_chars': str(value)[:100],
+                    'last_100_chars': str(value)[-100:] if len(str(value)) > 100 else 'N/A',
+                    'contains_brackets': '[' in str(value) and ']' in str(value),
+                    'starts_with_bracket': str(value).strip().startswith('['),
+                    'ends_with_bracket': str(value).strip().endswith(']'),
+                    'sample_parsing_attempt': None
+                }
+                
+                # Try a quick parsing attempt to see what fails
+                if isinstance(value, str) and len(value) > 0:
+                    try:
+                        import ast
+                        ast.literal_eval(value)
+                        debug_info[key]['sample_parsing_attempt'] = 'AST parsing would succeed'
+                    except Exception as e:
+                        debug_info[key]['sample_parsing_attempt'] = f'AST parsing fails: {str(e)[:200]}'
+        
+        return jsonify({
+            'debug_info': debug_info,
+            'recommendations': [
+                'Check the exact format of stored strings',
+                'Look for malformed quotes or brackets',
+                'Consider if data is double-encoded'
+            ]
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/')
 def home():
@@ -267,7 +384,7 @@ def get_transactions():
             }), 404
         
         # ✅ WORKING FIX: Use the new parsing function
-        parsed_data = safe_parse_json_fields_WORKING(raw_transactions_data.copy())
+        parsed_data = safe_parse_json_fields_ENHANCED(raw_transactions_data.copy())
         logger.info("✅ Data parsed with WORKING function")
         
         # Extract arrays
