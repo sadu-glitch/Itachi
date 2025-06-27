@@ -704,7 +704,7 @@ def upload_file():
     }), 200
 
 if __name__ == '__main__':
-    # Check if database password is set before starting
+    # Check if database password is set before startingg
     if not os.getenv("DB_PASSWORD"):
         print("❌ WARNING: DB_PASSWORD environment variable not set!")
         print("The API will start but database operations will fail.")
