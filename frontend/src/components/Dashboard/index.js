@@ -10,6 +10,7 @@ import { useBudgetProgress } from '../../hooks/useBudget';
 import EnhancedExcelExportButton from './EnhancedExcelExportButton';
 import '../../styles/excel-export.css';
 import TransactionDebugger from './TransactionDebugger';
+import APIDiagnostic from './APIDiagnostic';
 
 const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
   // State for navigation and selection
@@ -247,6 +248,8 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
   selectedDepartment={selectedDepartment}
   selectedRegion={selectedRegion}
 />
+
+<APIDiagnostic baseApiUrl={baseApiUrl} />
       
       {/* Conditional rendering based on selection state */}
       {!selectedDepartment && (
