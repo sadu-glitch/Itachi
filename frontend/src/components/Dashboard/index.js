@@ -243,10 +243,10 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
       
       {/* ✅ ADD THE DEBUG COMPONENT HERE */}
       <TransactionDebugger 
-        baseApiUrl={baseApiUrl}
-        selectedDepartment={selectedDepartment}
-        selectedRegion={selectedRegion}
-      />
+  baseApiUrl={baseApiUrl}
+  selectedDepartment={selectedDepartment}
+  selectedRegion={selectedRegion}
+/>
       
       {/* Conditional rendering based on selection state */}
       {!selectedDepartment && (

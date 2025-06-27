@@ -1,219 +1,282 @@
 import React, { useState, useEffect } from 'react';
 
-/**
- * Debug component to inspect transaction data structure
- * Add this temporarily to your Dashboard to see what's actually in the data
- */
 const TransactionDebugger = ({ baseApiUrl, selectedDepartment, selectedRegion }) => {
-  const [rawData, setRawData] = useState(null);
+  const [debugData, setDebugData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [showRawData, setShowRawData] = useState(false);
 
-  useEffect(() => {
-    const fetchRawData = async () => {
-      try {
-        setLoading(true);
-        const normalizedApiUrl = baseApiUrl.endsWith('/') 
-          ? baseApiUrl.slice(0, -1) 
-          : baseApiUrl;
-          
-        const response = await fetch(`${normalizedApiUrl}/api/transactions`);
-        if (response.ok) {
-          const data = await response.json();
-          setRawData(data);
-          
-          // ✅ DETAILED LOGGING
-          console.log('🔍 RAW API DATA ANALYSIS:');
-          console.log('1. Full API Response Keys:', Object.keys(data));
-          console.log('2. Transactions Array Length:', data.transactions?.length || 0);
-          console.log('3. First 3 Transactions:', data.transactions?.slice(0, 3));
-          
-          // Check department names in transactions
-          if (data.transactions?.length > 0) {
-            const departments = [...new Set(data.transactions.map(tx => tx.department))];
-            console.log('4. Unique Departments in Data:', departments);
-            
-            const regions = [...new Set(data.transactions.map(tx => tx.region).filter(Boolean))];
-            console.log('5. Unique Regions in Data:', regions);
-            
-            // Check for the specific department
-            if (selectedDepartment) {
-              const deptTransactions = data.transactions.filter(tx => tx.department === selectedDepartment);
-              console.log(`6. Transactions for "${selectedDepartment}":`, deptTransactions.length);
-              
-              if (deptTransactions.length > 0) {
-                const deptRegions = [...new Set(deptTransactions.map(tx => tx.region).filter(Boolean))];
-                console.log(`7. Regions in "${selectedDepartment}":`, deptRegions);
-                
-                // Sample transaction for this department
-                console.log('8. Sample transaction for this department:', deptTransactions[0]);
-              }
-            }
-            
-            // Check for the specific region
-            if (selectedRegion) {
-              const regionTransactions = data.transactions.filter(tx => tx.region === selectedRegion);
-              console.log(`9. Transactions for region "${selectedRegion}":`, regionTransactions.length);
-              
-              if (regionTransactions.length > 0) {
-                console.log('10. Sample region transaction:', regionTransactions[0]);
-              } else {
-                // Check if region name exists with different formatting
-                const allRegions = data.transactions.map(tx => tx.region).filter(Boolean);
-                const similarRegions = allRegions.filter(region => 
-                  region && (
-                    region.toLowerCase().includes(selectedRegion.toLowerCase()) ||
-                    selectedRegion.toLowerCase().includes(region.toLowerCase())
-                  )
-                );
-                console.log(`11. Similar region names found:`, similarRegions);
-              }
-            }
-          }
-        }
-      } catch (error) {
-        console.error('❌ Debug fetch error:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (baseApiUrl) {
-      fetchRawData();
+  // Fetch transaction data
+  const fetchDebugData = async () => {
+    if (!baseApiUrl) {
+      setError('No API URL provided');
+      return;
     }
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const normalizedApiUrl = baseApiUrl.endsWith('/') 
+        ? baseApiUrl.slice(0, -1) 
+        : baseApiUrl;
+
+      // Build URL with filters if department is selected
+      let url = `${normalizedApiUrl}/api/transactions`;
+      if (selectedDepartment) {
+        url += `?department=${encodeURIComponent(selectedDepartment)}`;
+      }
+
+      console.log('🔍 TransactionDebugger: Fetching from:', url);
+
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        throw new Error(`API Error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      console.log('🔍 TransactionDebugger: Raw API Response:', data);
+
+      setDebugData(data);
+    } catch (err) {
+      console.error('❌ TransactionDebugger: Error:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Auto-fetch on component mount and when filters change
+  useEffect(() => {
+    fetchDebugData();
   }, [baseApiUrl, selectedDepartment, selectedRegion]);
 
-  if (loading) return <div>🔄 Loading debug data...</div>;
-  if (!rawData) return <div>❌ No debug data available</div>;
+  if (loading) {
+    return (
+      <div style={{ 
+        padding: '20px', 
+        border: '2px solid #007acc', 
+        borderRadius: '8px', 
+        margin: '20px 0',
+        backgroundColor: '#f0f8ff'
+      }}>
+        <h3>🔍 Transaction Debugger</h3>
+        <p>Loading transaction data...</p>
+      </div>
+    );
+  }
 
-  const { transactions = [] } = rawData;
+  if (error) {
+    return (
+      <div style={{ 
+        padding: '20px', 
+        border: '2px solid #dc3545', 
+        borderRadius: '8px', 
+        margin: '20px 0',
+        backgroundColor: '#fff5f5'
+      }}>
+        <h3>🔍 Transaction Debugger</h3>
+        <p style={{ color: '#dc3545' }}>❌ Error: {error}</p>
+        <button onClick={fetchDebugData} style={{ marginTop: '10px' }}>
+          🔄 Retry
+        </button>
+      </div>
+    );
+  }
 
-  // Department analysis
-  const departmentStats = {};
-  transactions.forEach(tx => {
-    const dept = tx.department || 'NO_DEPARTMENT';
-    if (!departmentStats[dept]) {
-      departmentStats[dept] = { count: 0, regions: new Set() };
-    }
-    departmentStats[dept].count++;
-    if (tx.region) {
-      departmentStats[dept].regions.add(tx.region);
-    }
-  });
+  if (!debugData) {
+    return (
+      <div style={{ 
+        padding: '20px', 
+        border: '2px solid #ffc107', 
+        borderRadius: '8px', 
+        margin: '20px 0',
+        backgroundColor: '#fffbf0'
+      }}>
+        <h3>🔍 Transaction Debugger</h3>
+        <p>No data available</p>
+        <button onClick={fetchDebugData}>
+          🔄 Fetch Data
+        </button>
+      </div>
+    );
+  }
 
-  // Convert Sets to Arrays for display
-  Object.keys(departmentStats).forEach(dept => {
-    departmentStats[dept].regions = Array.from(departmentStats[dept].regions);
-  });
+  // Extract data arrays
+  const allTransactions = debugData.transactions || [];
+  const parkedMeasures = debugData.parked_measures || [];
+  const bookedMeasures = debugData.booked_measures || [];
+  const directCosts = debugData.direct_costs || [];
+  const outliers = debugData.outliers || [];
+
+  // Categorize transactions by type
+  const transactionsByCategory = {
+    'BOOKED_MEASURE': allTransactions.filter(tx => tx.category === 'BOOKED_MEASURE'),
+    'PARKED_MEASURE': allTransactions.filter(tx => tx.category === 'PARKED_MEASURE'),
+    'UNASSIGNED_MEASURE': allTransactions.filter(tx => tx.category === 'UNASSIGNED_MEASURE'),
+    'DIRECT_COST': allTransactions.filter(tx => tx.category === 'DIRECT_COST'),
+    'OUTLIER': allTransactions.filter(tx => tx.category === 'OUTLIER')
+  };
 
   return (
-    <div style={{
-      backgroundColor: '#f0f8ff',
-      border: '2px solid #0066cc',
-      borderRadius: '8px',
-      padding: '16px',
-      margin: '16px 0',
-      fontSize: '12px',
-      fontFamily: 'monospace'
+    <div style={{ 
+      padding: '20px', 
+      border: '2px solid #28a745', 
+      borderRadius: '8px', 
+      margin: '20px 0',
+      backgroundColor: '#f8fff9',
+      fontFamily: 'monospace, Arial'
     }}>
-      <h3 style={{ color: '#0066cc', margin: '0 0 12px 0' }}>🔍 Transaction Data Debug Panel</h3>
-      
-      <div style={{ marginBottom: '12px' }}>
-        <strong>API Response Summary:</strong><br/>
-        • Total Transactions: {transactions.length}<br/>
-        • Parked Measures: {rawData.parked_measures?.length || 0}<br/>
-        • Direct Costs: {rawData.direct_costs?.length || 0}<br/>
-        • Booked Measures: {rawData.booked_measures?.length || 0}<br/>
-      </div>
-
-      <div style={{ marginBottom: '12px' }}>
-        <strong>Current Selection:</strong><br/>
-        • Department: {selectedDepartment || 'None'}<br/>
-        • Region: {selectedRegion || 'None'}<br/>
-      </div>
-
-      <div style={{ marginBottom: '12px' }}>
-        <strong>Department Statistics:</strong><br/>
-        {Object.entries(departmentStats).slice(0, 5).map(([dept, stats]) => (
-          <div key={dept} style={{ marginLeft: '8px', marginBottom: '4px' }}>
-            • "{dept}": {stats.count} transactions, {stats.regions.length} regions
-          </div>
-        ))}
-        {Object.keys(departmentStats).length > 5 && (
-          <div style={{ marginLeft: '8px', color: '#666' }}>
-            ... and {Object.keys(departmentStats).length - 5} more departments
-          </div>
-        )}
-      </div>
-
-      {selectedDepartment && (
-        <div style={{ marginBottom: '12px' }}>
-          <strong>Selected Department "{selectedDepartment}":</strong><br/>
-          {departmentStats[selectedDepartment] ? (
-            <>
-              • Transactions: {departmentStats[selectedDepartment].count}<br/>
-              • Regions: {departmentStats[selectedDepartment].regions.join(', ') || 'None'}<br/>
-            </>
-          ) : (
-            <span style={{ color: 'red' }}>❌ Department not found in data!</span>
-          )}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+        <h3>🔍 Transaction Debugger</h3>
+        <div>
+          <button 
+            onClick={fetchDebugData}
+            style={{ marginRight: '10px', padding: '5px 10px' }}
+          >
+            🔄 Refresh
+          </button>
+          <button 
+            onClick={() => setShowRawData(!showRawData)}
+            style={{ padding: '5px 10px' }}
+          >
+            {showRawData ? '📊 Show Summary' : '🗂️ Show Raw Data'}
+          </button>
         </div>
-      )}
+      </div>
 
-      {selectedRegion && (
-        <div style={{ marginBottom: '12px' }}>
-          <strong>Selected Region "{selectedRegion}":</strong><br/>
-          {(() => {
-            const regionTransactions = transactions.filter(tx => tx.region === selectedRegion);
-            const regionCount = regionTransactions.length;
-            
-            if (regionCount > 0) {
-              const categories = [...new Set(regionTransactions.map(tx => tx.category))];
-              return (
-                <>
-                  • Transactions: {regionCount}<br/>
-                  • Categories: {categories.join(', ')}<br/>
-                </>
-              );
-            } else {
-              // Check for similar region names
-              const allRegions = [...new Set(transactions.map(tx => tx.region).filter(Boolean))];
-              const similar = allRegions.filter(region => 
-                region && (
-                  region.toLowerCase().includes(selectedRegion.toLowerCase()) ||
-                  selectedRegion.toLowerCase().includes(region.toLowerCase())
-                )
-              );
-              
-              return (
-                <>
-                  <span style={{ color: 'red' }}>❌ Region not found in data!</span><br/>
-                  {similar.length > 0 && (
-                    <>• Similar regions: {similar.join(', ')}<br/></>
-                  )}
-                  • All regions: {allRegions.slice(0, 10).join(', ')}
-                  {allRegions.length > 10 && '...'}
-                </>
-              );
-            }
-          })()}
-        </div>
-      )}
+      {/* Filters Applied */}
+      <div style={{ marginBottom: '15px', padding: '10px', backgroundColor: '#e9ecef', borderRadius: '4px' }}>
+        <strong>🔧 Current Filters:</strong>
+        <br />
+        Department: {selectedDepartment || 'None'}
+        <br />
+        Region: {selectedRegion || 'None'}
+        <br />
+        API URL: {baseApiUrl}
+      </div>
 
-      <div>
-        <strong>Sample Transaction Structure:</strong><br/>
-        {transactions.length > 0 && (
+      {showRawData ? (
+        /* Raw Data View */
+        <div>
+          <h4>📋 Raw API Response</h4>
           <pre style={{ 
-            backgroundColor: '#fff', 
-            padding: '8px', 
-            borderRadius: '4px',
-            fontSize: '10px',
+            backgroundColor: '#f1f1f1', 
+            padding: '10px', 
+            borderRadius: '4px', 
             overflow: 'auto',
-            maxHeight: '200px'
+            maxHeight: '400px',
+            fontSize: '12px'
           }}>
-            {JSON.stringify(transactions[0], null, 2)}
+            {JSON.stringify(debugData, null, 2)}
           </pre>
-        )}
-      </div>
+        </div>
+      ) : (
+        /* Summary View */
+        <div>
+          {/* Overview Stats */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px', marginBottom: '20px' }}>
+            <div style={{ padding: '10px', backgroundColor: '#007acc', color: 'white', borderRadius: '4px', textAlign: 'center' }}>
+              <div style={{ fontSize: '24px', fontWeight: 'bold' }}>{allTransactions.length}</div>
+              <div>All Transactions</div>
+            </div>
+            <div style={{ padding: '10px', backgroundColor: '#28a745', color: 'white', borderRadius: '4px', textAlign: 'center' }}>
+              <div style={{ fontSize: '24px', fontWeight: 'bold' }}>{bookedMeasures.length}</div>
+              <div>Booked Measures</div>
+            </div>
+            <div style={{ padding: '10px', backgroundColor: '#ffc107', color: 'black', borderRadius: '4px', textAlign: 'center' }}>
+              <div style={{ fontSize: '24px', fontWeight: 'bold' }}>{parkedMeasures.length}</div>
+              <div>Parked Measures</div>
+            </div>
+            <div style={{ padding: '10px', backgroundColor: '#dc3545', color: 'white', borderRadius: '4px', textAlign: 'center' }}>
+              <div style={{ fontSize: '24px', fontWeight: 'bold' }}>{directCosts.length}</div>
+              <div>Direct Costs</div>
+            </div>
+          </div>
+
+          {/* Breakdown by Category */}
+          <h4>📊 Transactions by Category</h4>
+          <div style={{ marginBottom: '20px' }}>
+            {Object.entries(transactionsByCategory).map(([category, transactions]) => (
+              <div key={category} style={{ marginBottom: '10px' }}>
+                <strong>{category}:</strong> {transactions.length} transactions
+                {transactions.length > 0 && (
+                  <ul style={{ marginLeft: '20px', fontSize: '12px' }}>
+                    {transactions.slice(0, 3).map((tx, idx) => (
+                      <li key={idx}>
+                        ID: {tx.transaction_id || tx.measure_id || 'No ID'} | 
+                        Amount: €{tx.amount || tx.actual_amount || tx.estimated_amount || 0} | 
+                        Status: {tx.status} | 
+                        Dept: {tx.department || 'N/A'}
+                      </li>
+                    ))}
+                    {transactions.length > 3 && <li>... and {transactions.length - 3} more</li>}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Separate Arrays */}
+          <h4>📋 Separate Arrays from API</h4>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+            {/* Booked Measures */}
+            <div style={{ border: '1px solid #28a745', borderRadius: '4px', padding: '10px' }}>
+              <h5 style={{ color: '#28a745', margin: '0 0 10px 0' }}>✅ Booked Measures ({bookedMeasures.length})</h5>
+              {bookedMeasures.length === 0 ? (
+                <p style={{ color: '#666', fontStyle: 'italic' }}>No booked measures found</p>
+              ) : (
+                <div style={{ maxHeight: '200px', overflow: 'auto' }}>
+                  {bookedMeasures.slice(0, 5).map((measure, idx) => (
+                    <div key={idx} style={{ marginBottom: '8px', padding: '5px', backgroundColor: '#f8fff9', borderRadius: '3px', fontSize: '12px' }}>
+                      <div><strong>Bestellnummer:</strong> {measure.bestellnummer}</div>
+                      <div><strong>Title:</strong> {measure.measure_title || 'N/A'}</div>
+                      <div><strong>Amount:</strong> €{measure.actual_amount || 0}</div>
+                      <div><strong>Department:</strong> {measure.department}</div>
+                      <div><strong>Status:</strong> {measure.status}</div>
+                    </div>
+                  ))}
+                  {bookedMeasures.length > 5 && <p>... and {bookedMeasures.length - 5} more</p>}
+                </div>
+              )}
+            </div>
+
+            {/* Parked Measures */}
+            <div style={{ border: '1px solid #ffc107', borderRadius: '4px', padding: '10px' }}>
+              <h5 style={{ color: '#b8860b', margin: '0 0 10px 0' }}>⏳ Parked Measures ({parkedMeasures.length})</h5>
+              {parkedMeasures.length === 0 ? (
+                <p style={{ color: '#666', fontStyle: 'italic' }}>No parked measures found</p>
+              ) : (
+                <div style={{ maxHeight: '200px', overflow: 'auto' }}>
+                  {parkedMeasures.slice(0, 5).map((measure, idx) => (
+                    <div key={idx} style={{ marginBottom: '8px', padding: '5px', backgroundColor: '#fffbf0', borderRadius: '3px', fontSize: '12px' }}>
+                      <div><strong>Bestellnummer:</strong> {measure.bestellnummer}</div>
+                      <div><strong>Title:</strong> {measure.measure_title || 'N/A'}</div>
+                      <div><strong>Estimated:</strong> €{measure.estimated_amount || 0}</div>
+                      <div><strong>Department:</strong> {measure.department}</div>
+                      <div><strong>Status:</strong> {measure.status}</div>
+                      <div><strong>Category:</strong> {measure.category}</div>
+                    </div>
+                  ))}
+                  {parkedMeasures.length > 5 && <p>... and {parkedMeasures.length - 5} more</p>}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* API Response Structure */}
+          <div style={{ marginTop: '20px', padding: '10px', backgroundColor: '#f8f9fa', borderRadius: '4px' }}>
+            <h5>🗂️ API Response Structure</h5>
+            <div style={{ fontSize: '12px' }}>
+              <div><strong>Available Keys:</strong> {Object.keys(debugData).join(', ')}</div>
+              <div><strong>Summary:</strong> {debugData.summary ? 'Present' : 'Missing'}</div>
+              <div><strong>Statistics:</strong> {debugData.statistics ? 'Present' : 'Missing'}</div>
+              <div><strong>Processing Date:</strong> {debugData.processing_date || 'Not available'}</div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
