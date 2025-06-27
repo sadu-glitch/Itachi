@@ -65,9 +65,9 @@ def parse_python_string_to_list(python_string):
         logger.error(f"Failed to parse Python string: {str(e)}")
         return []
 
-def safe_parse_json_fields_TARGETED_FIX(data):
+def safe_parse_json_fields_CORRECT_FIX(data):
     """
-    TARGETED FIX: Handles datetime() calls and other function calls in Python strings
+    CORRECT FIX: Handles datetime.date() and datetime.datetime() objects properly
     """
     if not isinstance(data, dict):
         return data
@@ -91,7 +91,7 @@ def safe_parse_json_fields_TARGETED_FIX(data):
                 except json.JSONDecodeError:
                     pass
                 
-                # Method 2: Try AST literal eval (works for direct_costs)
+                # Method 2: Try AST literal eval (works for simple cases)
                 try:
                     import ast
                     parsed_value = ast.literal_eval(value)
@@ -99,73 +99,87 @@ def safe_parse_json_fields_TARGETED_FIX(data):
                     logger.info(f"✅ AST parsed {key}: {len(parsed_value)} items")
                     continue
                 except (ValueError, SyntaxError):
-                    logger.info(f"❌ AST failed for {key}, trying datetime fix...")
+                    logger.info(f"❌ AST failed for {key}, trying datetime.date fix...")
                 
-                # Method 3: TARGETED FIX for datetime and function calls
+                # Method 3: CORRECT FIX for datetime.date() objects
                 try:
                     import re
                     
                     # Create a copy to work with
                     fixed_value = value
+                    logger.info(f"🔧 Applying datetime fixes to {key}")
                     
-                    # Fix 1: Replace datetime() function calls with string representations
-                    # Pattern: datetime(2025, 6, 11, 12, 9, 17, 776666) -> "2025-06-11 12:09:17.776666"
-                    datetime_pattern = r'datetime\((\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\)'
+                    # Fix 1: Replace datetime.date(year, month, day) with "YYYY-MM-DD"
+                    date_pattern = r'datetime\.date\((\d+),\s*(\d+),\s*(\d+)\)'
+                    def date_replacer(match):
+                        year, month, day = match.groups()
+                        return f'"{year}-{month:0>2}-{day:0>2}"'
+                    
+                    fixed_value = re.sub(date_pattern, date_replacer, fixed_value)
+                    logger.info(f"🔧 Applied date pattern fix to {key}")
+                    
+                    # Fix 2: Replace datetime.datetime(...) with ISO string
+                    datetime_pattern = r'datetime\.datetime\((\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)(?:,\s*(\d+))?\)'
                     def datetime_replacer(match):
-                        year, month, day, hour, minute, second, microsecond = match.groups()
+                        year, month, day, hour, minute, second = match.groups()[:6]
+                        microsecond = match.groups()[6] if match.groups()[6] else '0'
                         return f'"{year}-{month:0>2}-{day:0>2} {hour:0>2}:{minute:0>2}:{second:0>2}.{microsecond}"'
                     
                     fixed_value = re.sub(datetime_pattern, datetime_replacer, fixed_value)
+                    logger.info(f"🔧 Applied datetime pattern fix to {key}")
                     
-                    # Fix 2: Replace other common function calls that might appear
-                    # Replace Decimal('123.45') with 123.45
+                    # Fix 3: Replace Decimal('123.45') with 123.45
                     decimal_pattern = r"Decimal\('([^']+)'\)"
                     fixed_value = re.sub(decimal_pattern, r'\1', fixed_value)
                     
-                    # Fix 3: Replace any remaining function calls with their string representation
-                    # This is a more general pattern for function_name(...) -> "function_name(...)"
-                    function_pattern = r'([a-zA-Z_][a-zA-Z0-9_]*)\([^)]*\)'
-                    # Only replace if it's not already in quotes
-                    def function_replacer(match):
-                        full_match = match.group(0)
-                        # Check if this function call is already inside quotes
-                        return f'"{full_match}"'
+                    # Fix 4: Replace other common object types
+                    uuid_pattern = r"UUID\('([^']+)'\)"
+                    fixed_value = re.sub(uuid_pattern, r'"\1"', fixed_value)
                     
-                    # Be more careful with this replacement - only replace specific known problematic functions
-                    problematic_functions = ['datetime', 'Decimal', 'UUID', 'ObjectId']
-                    for func_name in problematic_functions:
-                        pattern = f'{func_name}\\([^)]*\\)'
-                        fixed_value = re.sub(pattern, lambda m: f'"{m.group(0)}"', fixed_value)
+                    logger.info(f"🔧 All regex fixes applied to {key}, attempting parse...")
                     
                     # Try parsing the fixed value
                     parsed_value = ast.literal_eval(fixed_value)
                     data[key] = parsed_value
-                    logger.info(f"✅ Datetime fix parsed {key}: {len(parsed_value)} items")
+                    logger.info(f"✅ Regex fix parsed {key}: {len(parsed_value)} items")
                     continue
                     
-                except Exception as datetime_error:
-                    logger.error(f"❌ Datetime fix failed for {key}: {str(datetime_error)[:200]}")
+                except Exception as regex_error:
+                    logger.error(f"❌ Regex fix failed for {key}: {str(regex_error)[:300]}")
+                    # Log a sample of what we tried to parse
+                    logger.error(f"Sample fixed data: {fixed_value[:500]}...")
                 
-                # Method 4: Last resort - controlled eval with limited scope
+                # Method 4: Safe eval with proper datetime imports
                 try:
-                    logger.warning(f"⚠️ Using controlled eval for {key}")
+                    logger.warning(f"⚠️ Using safe eval for {key}")
                     
-                    # Create a safe evaluation environment
-                    from datetime import datetime
+                    # Import all the modules that might be needed
+                    from datetime import datetime, date, time
                     from decimal import Decimal
+                    import uuid
                     
+                    # Create a safe evaluation environment with the needed classes
                     safe_dict = {
                         'datetime': datetime,
+                        'date': date,
+                        'time': time,
                         'Decimal': Decimal,
+                        'UUID': uuid.UUID,
                         '__builtins__': {},
                     }
+                    
+                    # Add the datetime.date reference specifically
+                    safe_dict['datetime.date'] = date
+                    safe_dict['datetime.datetime'] = datetime
                     
                     parsed_value = eval(value, safe_dict)
                     
                     # Convert the result to JSON-serializable format
                     def make_serializable(obj):
-                        if hasattr(obj, 'isoformat'):  # datetime objects
+                        if hasattr(obj, 'isoformat'):  # datetime and date objects
                             return obj.isoformat()
+                        elif isinstance(obj, Decimal):
+                            return float(obj)
                         elif hasattr(obj, '__str__') and not isinstance(obj, (str, int, float, bool, type(None))):
                             return str(obj)
                         elif isinstance(obj, list):
@@ -177,11 +191,11 @@ def safe_parse_json_fields_TARGETED_FIX(data):
                     
                     serializable_value = make_serializable(parsed_value)
                     data[key] = serializable_value
-                    logger.info(f"✅ Controlled eval parsed {key}: {len(serializable_value)} items")
+                    logger.info(f"✅ Safe eval parsed {key}: {len(serializable_value)} items")
                     continue
                     
                 except Exception as eval_error:
-                    logger.error(f"❌ Controlled eval failed for {key}: {str(eval_error)[:200]}")
+                    logger.error(f"❌ Safe eval failed for {key}: {str(eval_error)[:300]}")
                 
                 # If everything fails, set empty array
                 logger.error(f"💥 ALL METHODS FAILED for {key}")
@@ -194,6 +208,51 @@ def safe_parse_json_fields_TARGETED_FIX(data):
                 data[key] = []
     
     return data
+
+
+# Test endpoint for the corrected fix:
+@app.route('/api/test-correct-fix', methods=['GET'])
+def test_correct_fix():
+    """
+    Test the corrected datetime.date fix
+    """
+    try:
+        # Get raw data
+        raw_data = get_processed_data_from_database("transactions")
+        
+        if 'booked_measures' not in raw_data:
+            return jsonify({'error': 'No booked_measures field found'})
+        
+        booked_raw = raw_data['booked_measures']
+        
+        # Test just the booked_measures
+        test_data = {'booked_measures': booked_raw}
+        parsed_test_data = safe_parse_json_fields_CORRECT_FIX(test_data)
+        
+        booked_measures = parsed_test_data['booked_measures']
+        
+        result = {
+            'parsing_success': isinstance(booked_measures, list),
+            'parsed_count': len(booked_measures) if isinstance(booked_measures, list) else 0,
+            'sample_items': booked_measures[:3] if isinstance(booked_measures, list) and len(booked_measures) > 0 else [],
+            'datetime_objects_found': 'datetime.date(' in booked_raw,
+            'sample_datetime_line': None
+        }
+        
+        # Find a line with datetime.date for analysis
+        if 'datetime.date(' in booked_raw:
+            lines = booked_raw.split('datetime.date(')
+            if len(lines) > 1:
+                result['sample_datetime_line'] = 'datetime.date(' + lines[1].split(')')[0] + ')'
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
 
 
 # Update your main endpoint to use the new function:
@@ -427,7 +486,7 @@ def get_transactions():
             }), 404
         
         # ✅ WORKING FIX: Use the new parsing function
-        parsed_data = safe_parse_json_fields_ENHANCED(raw_transactions_data.copy())
+        parsed_data = safe_parse_json_fields_CORRECT_FIX(raw_transactions_data.copy())
         logger.info("✅ Data parsed with WORKING function")
         
         # Extract arrays
