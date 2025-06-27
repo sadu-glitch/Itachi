@@ -11,6 +11,7 @@ import logging
 from urllib.parse import unquote
 import ast
 from sqlalchemy import text
+import time
 
 # Database-integrated imports
 try:
@@ -54,6 +55,16 @@ def get_db_manager():
     if db_manager is None:
         db_manager = DatabaseManager()
     return db_manager
+def reset_connection(self):
+    """Reset database connection if it's stale"""
+    try:
+        if self.engine:
+            self.engine.dispose()
+        self._setup_connection()
+        logger.info("✅ Database connection reset successfully")
+    except Exception as e:
+        logger.error(f"❌ Failed to reset connection: {e}")
+        raise
 
 def parse_python_string_to_list(python_string):
     """Helper function to safely parse Python string representations to lists"""
@@ -898,6 +909,7 @@ def assign_measure():
         
         # Find the measure to update
         measure_found = False
+        action_message = ""
         
         if is_unassign:
             # Unassign logic
@@ -965,9 +977,18 @@ def assign_measure():
                 "message": f"Measure with bestellnummer {assignment['bestellnummer']} not found"
             }), 404
         
-        # Save updated transactions to database
-        save_to_database_as_json("transactions", transactions)
-        
+        # ✅ FIXED: Save with retry logic (INSIDE the function)
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                save_to_database_as_json("transactions", transactions)
+                logger.info(f"✅ Successfully saved on attempt {attempt + 1}")
+                break
+            except Exception as save_error:
+                logger.warning(f"⚠️ Save attempt {attempt + 1} failed: {str(save_error)}")
+                if attempt == max_retries - 1:
+                    raise  # Re-raise the error if all retries failed
+                time.sleep(1)  # Wait 1 second before retry
         
         return jsonify({
             "status": "success", 
