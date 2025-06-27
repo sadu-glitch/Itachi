@@ -130,13 +130,124 @@ def safe_parse_json_fields_WORKING(data):
     
     return data
 
-@app.route('/api/transactions-working-fix', methods=['GET'])
-def get_transactions_working_fix():
-    """
-    WORKING FIX: Properly parse string data from database
-    """
+@app.route('/')
+def home():
+    """Home endpoint"""
+    return {
+        "status": "online",
+        "service": "MSP-SAP Integration API (Database Version)",
+        "version": "2.1.0",
+        "storage": "Azure SQL Database",
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.route('/api/data', methods=['GET'])
+def get_data():
+    """Retrieve all processed data for the frontend from database"""
     try:
-        logger.info("🔧 Starting WORKING FIX /api/transactions request...")
+        logger.info("🔍 Starting /api/data request...")
+        
+        # Read all the processed data from database
+        try:
+            transactions = get_processed_data_from_database("transactions")
+            logger.info(f"✅ Loaded transactions: {type(transactions)}")
+        except Exception as e:
+            logger.error(f"❌ Failed to load transactions: {str(e)}")
+            transactions = {"error": str(e), "message": "Could not read transactions data"}
+            
+        try:
+            departments_data = get_processed_data_from_database("frontend_departments")
+            logger.info(f"🔍 Raw departments_data: {departments_data}")
+            
+            # ✅ FIXED: Use enhanced parsing with Python string support
+            if departments_data and 'departments' in departments_data:
+                dept_string = departments_data['departments']
+                if isinstance(dept_string, str):
+                    departments = parse_python_string_to_list(dept_string)
+                    logger.info(f"✅ Parsed departments from Python string: {len(departments)} items")
+                else:
+                    departments = dept_string if isinstance(dept_string, list) else []
+            else:
+                departments = []
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to load departments: {str(e)}")
+            departments = []
+        
+        try:
+            regions_data = get_processed_data_from_database("frontend_regions")
+            logger.info(f"🔍 Raw regions_data: {regions_data}")
+            
+            # ✅ FIXED: Use enhanced parsing with Python string support
+            if regions_data and 'regions' in regions_data:
+                regions_string = regions_data['regions']
+                if isinstance(regions_string, str):
+                    regions = parse_python_string_to_list(regions_string)
+                    logger.info(f"✅ Parsed regions from Python string: {len(regions)} items")
+                else:
+                    regions = regions_string if isinstance(regions_string, list) else []
+            else:
+                regions = []
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to load regions: {str(e)}")
+            regions = []
+        
+        try:
+            awaiting = get_processed_data_from_database("frontend_awaiting_assignment")
+            logger.info(f"✅ Loaded awaiting assignment: {type(awaiting)}")
+            
+            # Parse awaiting assignment strings too
+            if isinstance(awaiting, dict):
+                for dept_name, measures in awaiting.items():
+                    if isinstance(measures, str):
+                        try:
+                            awaiting[dept_name] = parse_python_string_to_list(measures)
+                            logger.info(f"✅ Parsed awaiting measures for {dept_name}")
+                        except Exception as parse_error:
+                            logger.error(f"❌ Failed to parse awaiting measures for {dept_name}: {str(parse_error)}")
+                            awaiting[dept_name] = []
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to load awaiting assignment: {str(e)}")
+            awaiting = {}
+        
+        try:
+            budgets = get_processed_data_from_database("budget_allocation")
+            logger.info(f"✅ Loaded budget allocation: {type(budgets)}")
+        except Exception as e:
+            logger.error(f"❌ Failed to load budget allocation: {str(e)}")
+            budgets = {}
+        
+        # Build the response
+        response_data = {
+            "departments": departments,
+            "regions": regions,  
+            "awaiting_assignment": awaiting,
+            "budget_allocation": budgets,
+            "transaction_stats": transactions.get('statistics', {}) if isinstance(transactions, dict) else {}
+        }
+        
+        logger.info(f"🎯 FINAL RESPONSE SUMMARY:")
+        logger.info(f"  - departments: {len(departments)} items (type: {type(departments)})")
+        logger.info(f"  - regions: {len(regions)} items (type: {type(regions)})")
+        logger.info(f"  - awaiting_assignment: {type(awaiting)} with {len(awaiting)} departments")
+        logger.info(f"  - budget_allocation: {type(budgets)}")
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        logger.error(f"❌ Critical error in /api/data: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+# ✅ MAIN WORKING ENDPOINT - USE THIS ONE!
+@app.route('/api/transactions', methods=['GET'])
+def get_transactions():
+    """Get transactions data - WORKING VERSION WITH PROPER PARSING"""
+    try:
+        logger.info("🔧 Starting WORKING /api/transactions request...")
         
         # Get query parameters
         department = request.args.get('department')
@@ -286,1119 +397,6 @@ def get_transactions_working_fix():
             "traceback": traceback.format_exc()
         }), 500
 
-@app.route('/')
-def home():
-    """Home endpoint"""
-    return {
-        "status": "online",
-        "service": "MSP-SAP Integration API (Database Version)",
-        "version": "2.0.0",
-        "storage": "Azure SQL Database",
-        "timestamp": datetime.now().isoformat()
-    }
-
-@app.route('/api/data', methods=['GET'])
-def get_data():
-    """Retrieve all processed data for the frontend from database"""
-    try:
-        logger.info("🔍 Starting /api/data request...")
-        
-        # Read all the processed data from database
-        try:
-            transactions = get_processed_data_from_database("transactions")
-            logger.info(f"✅ Loaded transactions: {type(transactions)}")
-        except Exception as e:
-            logger.error(f"❌ Failed to load transactions: {str(e)}")
-            transactions = {"error": str(e), "message": "Could not read transactions data"}
-            
-        try:
-            departments_data = get_processed_data_from_database("frontend_departments")
-            logger.info(f"🔍 Raw departments_data: {departments_data}")
-            
-            # ✅ FIXED: Use enhanced parsing with Python string support
-            if departments_data and 'departments' in departments_data:
-                dept_string = departments_data['departments']
-                if isinstance(dept_string, str):
-                    departments = parse_python_string_to_list(dept_string)
-                    logger.info(f"✅ Parsed departments from Python string: {len(departments)} items")
-                else:
-                    departments = dept_string if isinstance(dept_string, list) else []
-            else:
-                departments = []
-                
-        except Exception as e:
-            logger.error(f"❌ Failed to load departments: {str(e)}")
-            departments = []
-        
-        try:
-            regions_data = get_processed_data_from_database("frontend_regions")
-            logger.info(f"🔍 Raw regions_data: {regions_data}")
-            
-            # ✅ FIXED: Use enhanced parsing with Python string support
-            if regions_data and 'regions' in regions_data:
-                regions_string = regions_data['regions']
-                if isinstance(regions_string, str):
-                    regions = parse_python_string_to_list(regions_string)
-                    logger.info(f"✅ Parsed regions from Python string: {len(regions)} items")
-                else:
-                    regions = regions_string if isinstance(regions_string, list) else []
-            else:
-                regions = []
-                
-        except Exception as e:
-            logger.error(f"❌ Failed to load regions: {str(e)}")
-            regions = []
-        
-        try:
-            awaiting = get_processed_data_from_database("frontend_awaiting_assignment")
-            logger.info(f"✅ Loaded awaiting assignment: {type(awaiting)}")
-            
-            # Parse awaiting assignment strings too
-            if isinstance(awaiting, dict):
-                for dept_name, measures in awaiting.items():
-                    if isinstance(measures, str):
-                        try:
-                            awaiting[dept_name] = parse_python_string_to_list(measures)
-                            logger.info(f"✅ Parsed awaiting measures for {dept_name}")
-                        except Exception as parse_error:
-                            logger.error(f"❌ Failed to parse awaiting measures for {dept_name}: {str(parse_error)}")
-                            awaiting[dept_name] = []
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to load awaiting assignment: {str(e)}")
-            awaiting = {}
-        
-        try:
-            budgets = get_processed_data_from_database("budget_allocation")
-            logger.info(f"✅ Loaded budget allocation: {type(budgets)}")
-        except Exception as e:
-            logger.error(f"❌ Failed to load budget allocation: {str(e)}")
-            budgets = {}
-        
-        # Build the response
-        response_data = {
-            "departments": departments,
-            "regions": regions,  
-            "awaiting_assignment": awaiting,
-            "budget_allocation": budgets,
-            "transaction_stats": transactions.get('statistics', {}) if isinstance(transactions, dict) else {}
-        }
-        
-        logger.info(f"🎯 FINAL RESPONSE SUMMARY:")
-        logger.info(f"  - departments: {len(departments)} items (type: {type(departments)})")
-        logger.info(f"  - regions: {len(regions)} items (type: {type(regions)})")
-        logger.info(f"  - awaiting_assignment: {type(awaiting)} with {len(awaiting)} departments")
-        logger.info(f"  - budget_allocation: {type(budgets)}")
-        
-        return jsonify(response_data)
-        
-    except Exception as e:
-        logger.error(f"❌ Critical error in /api/data: {str(e)}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-# Add this new endpoint to your app.py to debug and fix the parsing issue
-
-@app.route('/api/transactions-debug', methods=['GET'])
-def get_transactions_debug():
-    """
-    DEBUG VERSION: Get transactions with detailed parsing diagnostics
-    """
-    try:
-        logger.info("🔍 Starting DEBUG /api/transactions request...")
-        
-        # Get query parameters
-        department = request.args.get('department')
-        region = request.args.get('region')
-        status = request.args.get('status')
-        category = request.args.get('category')
-        
-        logger.info(f"🔍 Filters: department={department}, region={region}, status={status}, category={category}")
-        
-        # Get raw data from database
-        try:
-            raw_transactions_data = get_processed_data_from_database("transactions")
-            logger.info(f"✅ Raw data type: {type(raw_transactions_data)}")
-            
-            if isinstance(raw_transactions_data, dict):
-                logger.info(f"✅ Raw data keys: {list(raw_transactions_data.keys())}")
-                
-                # DEBUG: Check each field individually
-                debug_info = {}
-                for key in ['transactions', 'booked_measures', 'parked_measures', 'direct_costs', 'outliers']:
-                    if key in raw_transactions_data:
-                        field_value = raw_transactions_data[key]
-                        debug_info[key] = {
-                            'type': type(field_value).__name__,
-                            'length': len(field_value) if hasattr(field_value, '__len__') else 'N/A',
-                            'is_string': isinstance(field_value, str),
-                            'first_100_chars': str(field_value)[:100] if isinstance(field_value, str) else 'Not string',
-                            'sample_data': field_value[:2] if isinstance(field_value, list) and len(field_value) > 0 else 'No sample'
-                        }
-                
-                logger.info(f"📊 DEBUG INFO: {debug_info}")
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to load raw transactions: {str(e)}")
-            return jsonify({
-                "error": "Could not load raw transactions data",
-                "message": str(e)
-            }), 500
-        
-        # ✅ ENHANCED PARSING FUNCTION
-        def enhanced_parse_field(field_value, field_name):
-            """Enhanced parsing with detailed logging"""
-            if field_value is None:
-                logger.info(f"🔍 {field_name}: None value")
-                return []
-            
-            if isinstance(field_value, list):
-                logger.info(f"✅ {field_name}: Already a list with {len(field_value)} items")
-                return field_value
-            
-            if isinstance(field_value, str):
-                logger.info(f"🔍 {field_name}: String value, length: {len(field_value)}")
-                logger.info(f"🔍 {field_name}: First 200 chars: {field_value[:200]}")
-                
-                # Try multiple parsing methods
-                try:
-                    # Method 1: JSON parsing
-                    import json
-                    parsed = json.loads(field_value)
-                    logger.info(f"✅ {field_name}: Parsed as JSON, got {len(parsed) if isinstance(parsed, list) else 'non-list'}")
-                    return parsed if isinstance(parsed, list) else []
-                except json.JSONDecodeError as json_err:
-                    logger.info(f"❌ {field_name}: JSON parsing failed: {json_err}")
-                
-                try:
-                    # Method 2: AST literal eval
-                    import ast
-                    parsed = ast.literal_eval(field_value)
-                    logger.info(f"✅ {field_name}: Parsed as Python literal, got {len(parsed) if isinstance(parsed, list) else 'non-list'}")
-                    return parsed if isinstance(parsed, list) else []
-                except (ValueError, SyntaxError) as ast_err:
-                    logger.info(f"❌ {field_name}: AST parsing failed: {ast_err}")
-                
-                try:
-                    # Method 3: Eval (dangerous but for debugging)
-                    parsed = eval(field_value)
-                    logger.info(f"⚠️ {field_name}: Parsed with eval (dangerous!), got {len(parsed) if isinstance(parsed, list) else 'non-list'}")
-                    return parsed if isinstance(parsed, list) else []
-                except Exception as eval_err:
-                    logger.info(f"❌ {field_name}: Eval parsing failed: {eval_err}")
-                
-                # If all parsing fails, return empty array
-                logger.error(f"💥 {field_name}: ALL PARSING METHODS FAILED")
-                return []
-            
-            logger.warning(f"⚠️ {field_name}: Unexpected type {type(field_value)}")
-            return []
-        
-        # Parse each field with enhanced logging
-        all_transactions = enhanced_parse_field(raw_transactions_data.get('transactions'), 'transactions')
-        booked_measures = enhanced_parse_field(raw_transactions_data.get('booked_measures'), 'booked_measures')
-        parked_measures = enhanced_parse_field(raw_transactions_data.get('parked_measures'), 'parked_measures')
-        direct_costs = enhanced_parse_field(raw_transactions_data.get('direct_costs'), 'direct_costs')
-        outliers = enhanced_parse_field(raw_transactions_data.get('outliers'), 'outliers')
-        placeholders = enhanced_parse_field(raw_transactions_data.get('placeholders'), 'placeholders')
-        
-        # Log final counts
-        logger.info(f"📊 FINAL PARSED COUNTS:")
-        logger.info(f"   - all_transactions: {len(all_transactions)}")
-        logger.info(f"   - booked_measures: {len(booked_measures)}")
-        logger.info(f"   - parked_measures: {len(parked_measures)}")
-        logger.info(f"   - direct_costs: {len(direct_costs)}")
-        logger.info(f"   - outliers: {len(outliers)}")
-        
-        # ✅ STEP 2: If transactions array is empty, rebuild it from components
-        if len(all_transactions) == 0 and (len(direct_costs) > 0 or len(booked_measures) > 0 or len(parked_measures) > 0):
-            logger.info("🔧 REBUILDING: transactions array is empty, rebuilding from component arrays...")
-            
-            all_transactions = []
-            
-            if direct_costs:
-                all_transactions.extend(direct_costs)
-                logger.info(f"✅ Added {len(direct_costs)} direct costs to transactions")
-            
-            if booked_measures:
-                all_transactions.extend(booked_measures)
-                logger.info(f"✅ Added {len(booked_measures)} booked measures to transactions")
-            
-            if parked_measures:
-                all_transactions.extend(parked_measures)
-                logger.info(f"✅ Added {len(parked_measures)} parked measures to transactions")
-            
-            if outliers:
-                all_transactions.extend(outliers)
-                logger.info(f"✅ Added {len(outliers)} outliers to transactions")
-            
-            if placeholders:
-                all_transactions.extend(placeholders)
-                logger.info(f"✅ Added {len(placeholders)} placeholders to transactions")
-            
-            logger.info(f"🔧 REBUILT: transactions array now has {len(all_transactions)} total transactions")
-
-        # Apply filters
-        filtered_transactions = all_transactions
-        
-        if department:
-            filtered_transactions = [tx for tx in filtered_transactions if tx.get('department') == department]
-            logger.info(f"🔍 After department filter: {len(filtered_transactions)} transactions")
-        
-        if region:
-            filtered_transactions = [tx for tx in filtered_transactions if tx.get('region') == region]
-            logger.info(f"🔍 After region filter: {len(filtered_transactions)} transactions")
-        
-        if status:
-            filtered_transactions = [tx for tx in filtered_transactions if tx.get('status') == status]
-            logger.info(f"🔍 After status filter: {len(filtered_transactions)} transactions")
-        
-        if category:
-            filtered_transactions = [tx for tx in filtered_transactions if tx.get('category') == category]
-            logger.info(f"🔍 After category filter: {len(filtered_transactions)} transactions")
-        
-        # Filter parked measures
-        filtered_parked_measures = parked_measures
-        if department:
-            filtered_parked_measures = [measure for measure in parked_measures if measure.get('department') == department]
-        
-        # Get statistics
-        statistics = raw_transactions_data.get('statistics', {})
-        
-        # Build response with DEBUG info
-        response_data = {
-            "transactions": filtered_transactions,
-            "parked_measures": filtered_parked_measures,
-            "direct_costs": direct_costs,
-            "booked_measures": booked_measures,
-            "outliers": outliers,
-            "placeholders": placeholders,
-            "statistics": statistics,
-            "summary": {
-                "total_transactions": len(all_transactions),
-                "filtered_transactions": len(filtered_transactions),
-                "parsing_success": True,
-                "raw_data_type": type(raw_transactions_data).__name__,
-                "by_category": {
-                    "DIRECT_COST": len([tx for tx in all_transactions if tx.get('category') == 'DIRECT_COST']),
-                    "BOOKED_MEASURE": len([tx for tx in all_transactions if tx.get('category') == 'BOOKED_MEASURE']),
-                    "PARKED_MEASURE": len([tx for tx in all_transactions if tx.get('category') == 'PARKED_MEASURE']),
-                    "UNASSIGNED_MEASURE": len([tx for tx in all_transactions if tx.get('category') == 'UNASSIGNED_MEASURE']),
-                    "OUTLIER": len([tx for tx in all_transactions if tx.get('category') == 'OUTLIER'])
-                }
-            },
-            "debug_info": {
-                "endpoint": "DEBUG VERSION",
-                "parsing_method": "enhanced_parse_field",
-                "arrays_rebuilt": len(all_transactions) > 0,
-                "original_counts": {
-                    "booked_measures": len(booked_measures),
-                    "parked_measures": len(parked_measures),
-                    "direct_costs": len(direct_costs),
-                    "outliers": len(outliers)
-                },
-                "raw_field_analysis": debug_info if 'debug_info' in locals() else {}
-            },
-            "filters_applied": {
-                "department": department,
-                "region": region,
-                "status": status,
-                "category": category
-            }
-        }
-        
-        logger.info(f"🎯 Returning DEBUG response with {len(filtered_transactions)} transactions, {len(booked_measures)} booked, {len(parked_measures)} parked")
-        
-        return jsonify(response_data)
-        
-    except Exception as e:
-        logger.error(f"❌ Error in DEBUG transactions endpoint: {str(e)}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({
-            "error": "Failed to fetch transactions (DEBUG version)",
-            "message": str(e),
-            "traceback": traceback.format_exc()
-        }), 500
-
-
-# ✅ ALSO ADD THIS SIMPLER FIXED VERSION
-@app.route('/api/transactions-simple-fix', methods=['GET'])
-def get_transactions_simple_fix():
-    """
-    SIMPLE FIX: Bypass the parsing issue by reading component arrays directly
-    """
-    try:
-        logger.info("🔧 Starting SIMPLE FIX /api/transactions request...")
-        
-        # Get query parameters
-        department = request.args.get('department')
-        
-        # Read the complete processed data
-        transactions_data = get_processed_data_from_database("transactions")
-        
-        if not transactions_data:
-            return jsonify({
-                "transactions": [],
-                "booked_measures": [],
-                "parked_measures": [],
-                "direct_costs": [],
-                "error": "No transaction data found"
-            }), 404
-        
-        # Get statistics (this works!)
-        statistics = transactions_data.get('statistics', {})
-        
-        # ✅ SIMPLE FIX: Use the statistics to validate data exists
-        expected_booked = statistics.get('booked_measures_count', 0)
-        expected_parked = statistics.get('parked_measures_count', 0)
-        expected_direct = statistics.get('direct_costs_count', 0)
-        
-        logger.info(f"📊 Expected counts from statistics: booked={expected_booked}, parked={expected_parked}, direct={expected_direct}")
-        
-        # If we have expected counts but arrays are empty, there's a parsing problem
-        # Let's try to reconstruct from the transactions array using categories
-        all_transactions = transactions_data.get('transactions', [])
-        
-        # If transactions is a string, try to parse it
-        if isinstance(all_transactions, str):
-            try:
-                import json
-                all_transactions = json.loads(all_transactions)
-                logger.info(f"✅ Parsed main transactions array from JSON: {len(all_transactions)} items")
-            except:
-                try:
-                    import ast
-                    all_transactions = ast.literal_eval(all_transactions)
-                    logger.info(f"✅ Parsed main transactions array from Python literal: {len(all_transactions)} items")
-                except:
-                    logger.error("❌ Could not parse main transactions array")
-                    all_transactions = []
-        
-        if not isinstance(all_transactions, list):
-            all_transactions = []
-        
-        # Filter and categorize from main transactions array
-        booked_measures = [tx for tx in all_transactions if tx.get('category') == 'BOOKED_MEASURE']
-        parked_measures = [tx for tx in all_transactions if tx.get('category') in ['PARKED_MEASURE', 'UNASSIGNED_MEASURE']]
-        direct_costs = [tx for tx in all_transactions if tx.get('category') == 'DIRECT_COST']
-        outliers = [tx for tx in all_transactions if tx.get('category') == 'OUTLIER']
-        
-        logger.info(f"📊 Categorized from main array: booked={len(booked_measures)}, parked={len(parked_measures)}, direct={len(direct_costs)}")
-        
-        # Apply department filter if specified
-        if department:
-            booked_measures = [tx for tx in booked_measures if tx.get('department') == department]
-            parked_measures = [tx for tx in parked_measures if tx.get('department') == department]
-            direct_costs = [tx for tx in direct_costs if tx.get('department') == department]
-            all_transactions = [tx for tx in all_transactions if tx.get('department') == department]
-        
-        # Build response
-        response_data = {
-            "transactions": all_transactions,
-            "booked_measures": booked_measures,
-            "parked_measures": parked_measures,
-            "direct_costs": direct_costs,
-            "outliers": outliers,
-            "statistics": statistics,
-            "summary": {
-                "total_transactions": len(all_transactions),
-                "by_category": {
-                    "BOOKED_MEASURE": len(booked_measures),
-                    "PARKED_MEASURE": len([tx for tx in parked_measures if tx.get('category') == 'PARKED_MEASURE']),
-                    "UNASSIGNED_MEASURE": len([tx for tx in parked_measures if tx.get('category') == 'UNASSIGNED_MEASURE']),
-                    "DIRECT_COST": len(direct_costs),
-                    "OUTLIER": len(outliers)
-                }
-            },
-            "fix_info": {
-                "method": "SIMPLE_FIX",
-                "parsed_from_main_array": True,
-                "expected_vs_actual": {
-                    "booked": f"{expected_booked} expected, {len(booked_measures)} found",
-                    "parked": f"{expected_parked} expected, {len(parked_measures)} found",
-                    "direct": f"{expected_direct} expected, {len(direct_costs)} found"
-                }
-            }
-        }
-        
-        logger.info(f"🎯 SIMPLE FIX returning: {len(booked_measures)} booked, {len(parked_measures)} parked measures")
-        
-        return jsonify(response_data)
-        
-    except Exception as e:
-        logger.error(f"❌ Error in SIMPLE FIX endpoint: {str(e)}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({
-            "error": "Failed in simple fix endpoint",
-            "message": str(e)
-        }), 500
-
-@app.route('/api/database-inspector', methods=['GET'])
-def database_inspector():
-    """
-    Inspect the raw database content to see what's actually stored
-    """
-    try:
-        logger.info("🔍 Starting database inspection...")
-        
-        # Get the database manager
-        db_mgr = get_db_manager()
-        
-        # Query the processing_results table directly
-        query = text("""
-            SELECT 
-                result_type,
-                LEN(data) as data_length,
-                LEFT(data, 500) as data_preview,
-                created_at
-            FROM processing_results 
-            WHERE result_type IN ('transactions', 'frontend_departments', 'frontend_regions')
-            ORDER BY result_type, created_at DESC
-        """)
-        
-        inspection_results = {}
-        
-        with db_mgr.engine.connect() as conn:
-            results = conn.execute(query).fetchall()
-            
-            for result in results:
-                result_type = result[0]
-                data_length = result[1]
-                data_preview = result[2]
-                created_at = result[3]
-                
-                if result_type not in inspection_results:
-                    inspection_results[result_type] = []
-                
-                inspection_results[result_type].append({
-                    'data_length': data_length,
-                    'data_preview': data_preview,
-                    'created_at': str(created_at),
-                    'preview_analysis': analyze_data_preview(data_preview)
-                })
-        
-        # Also get a more detailed look at the transactions data specifically
-        transactions_detail = None
-        try:
-            raw_transactions = get_processed_data_from_database("transactions")
-            if raw_transactions:
-                transactions_detail = {
-                    'type': type(raw_transactions).__name__,
-                    'keys': list(raw_transactions.keys()) if isinstance(raw_transactions, dict) else 'Not a dict',
-                    'field_analysis': {}
-                }
-                
-                if isinstance(raw_transactions, dict):
-                    for key in ['transactions', 'booked_measures', 'parked_measures', 'direct_costs', 'statistics']:
-                        if key in raw_transactions:
-                            field_value = raw_transactions[key]
-                            transactions_detail['field_analysis'][key] = {
-                                'type': type(field_value).__name__,
-                                'is_string': isinstance(field_value, str),
-                                'length': len(field_value) if hasattr(field_value, '__len__') else 'No length',
-                                'preview': str(field_value)[:200] if field_value else 'Empty/None',
-                                'contains_list_indicators': '[' in str(field_value) and ']' in str(field_value)
-                            }
-        except Exception as e:
-            transactions_detail = {'error': str(e)}
-        
-        return jsonify({
-            'database_inspection': inspection_results,
-            'transactions_detail': transactions_detail,
-            'inspection_time': datetime.now().isoformat(),
-            'recommendations': generate_recommendations(inspection_results, transactions_detail)
-        })
-        
-    except Exception as e:
-        logger.error(f"❌ Database inspection error: {str(e)}")
-        import traceback
-        return jsonify({
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }), 500
-
-def analyze_data_preview(data_preview):
-    """Analyze the data preview to understand the format"""
-    if not data_preview:
-        return {'type': 'empty', 'format': 'unknown'}
-    
-    analysis = {
-        'starts_with_bracket': data_preview.strip().startswith('['),
-        'starts_with_brace': data_preview.strip().startswith('{'),
-        'contains_transactions': 'transactions' in data_preview.lower(),
-        'contains_category': 'category' in data_preview.lower(),
-        'contains_booked_measure': 'BOOKED_MEASURE' in data_preview,
-        'contains_parked_measure': 'PARKED_MEASURE' in data_preview,
-        'contains_direct_cost': 'DIRECT_COST' in data_preview,
-        'likely_format': 'unknown'
-    }
-    
-    if analysis['starts_with_bracket']:
-        analysis['likely_format'] = 'json_array'
-    elif analysis['starts_with_brace']:
-        analysis['likely_format'] = 'json_object'
-    elif data_preview.strip().startswith("'") or data_preview.strip().startswith('"'):
-        analysis['likely_format'] = 'string_representation'
-    
-    return analysis
-
-def generate_recommendations(inspection_results, transactions_detail):
-    """Generate recommendations based on inspection results"""
-    recommendations = []
-    
-    if transactions_detail and 'field_analysis' in transactions_detail:
-        field_analysis = transactions_detail['field_analysis']
-        
-        # Check if booked_measures exists and is a string
-        if 'booked_measures' in field_analysis:
-            booked_info = field_analysis['booked_measures']
-            if booked_info['is_string'] and booked_info['length'] > 10:
-                recommendations.append({
-                    'issue': 'booked_measures is stored as string',
-                    'solution': 'Need to parse the string representation in the API',
-                    'priority': 'HIGH'
-                })
-            elif booked_info['length'] == 0 or booked_info['preview'] in ['[]', '""', "''", 'None']:
-                recommendations.append({
-                    'issue': 'booked_measures is empty in database',
-                    'solution': 'Need to check Python data processing - booked measures are not being saved',
-                    'priority': 'CRITICAL'
-                })
-        
-        # Check if parked_measures exists and is a string
-        if 'parked_measures' in field_analysis:
-            parked_info = field_analysis['parked_measures']
-            if parked_info['is_string'] and parked_info['length'] > 10:
-                recommendations.append({
-                    'issue': 'parked_measures is stored as string',
-                    'solution': 'Need to parse the string representation in the API',
-                    'priority': 'HIGH'
-                })
-            elif parked_info['length'] == 0 or parked_info['preview'] in ['[]', '""', "''", 'None']:
-                recommendations.append({
-                    'issue': 'parked_measures is empty in database',
-                    'solution': 'Need to check Python data processing - parked measures are not being saved',
-                    'priority': 'CRITICAL'
-                })
-        
-        # Check main transactions array
-        if 'transactions' in field_analysis:
-            trans_info = field_analysis['transactions']
-            if trans_info['length'] == 0 or trans_info['preview'] in ['[]', '""', "''", 'None']:
-                recommendations.append({
-                    'issue': 'Main transactions array is empty',
-                    'solution': 'Python processing is not building the complete transactions array',
-                    'priority': 'CRITICAL'
-                })
-    
-    # Check statistics vs data mismatch
-    if transactions_detail and 'field_analysis' in transactions_detail:
-        if 'statistics' in transactions_detail['field_analysis']:
-            recommendations.append({
-                'issue': 'Statistics show data exists but arrays are empty',
-                'solution': 'Statistics calculated correctly but transaction arrays not saved properly',
-                'priority': 'HIGH',
-                'action': 'Check save_to_database_as_json function in Python code'
-            })
-    
-    return recommendations
-
-
-# Add this simpler endpoint to check what gets returned by get_processed_data_from_database
-@app.route('/api/raw-database-data', methods=['GET'])
-def raw_database_data():
-    """
-    Get the exact raw data that get_processed_data_from_database returns
-    """
-    try:
-        raw_data = get_processed_data_from_database("transactions")
-        
-        analysis = {
-            'raw_data_type': type(raw_data).__name__,
-            'raw_data_keys': list(raw_data.keys()) if isinstance(raw_data, dict) else 'Not a dict',
-            'raw_data_size': len(str(raw_data)),
-            'field_details': {}
-        }
-        
-        if isinstance(raw_data, dict):
-            for key in ['transactions', 'booked_measures', 'parked_measures', 'direct_costs', 'statistics']:
-                if key in raw_data:
-                    field_value = raw_data[key]
-                    analysis['field_details'][key] = {
-                        'type': type(field_value).__name__,
-                        'length': len(field_value) if hasattr(field_value, '__len__') else 'No length',
-                        'is_empty': not bool(field_value),
-                        'preview': str(field_value)[:300],
-                        'full_value_if_small': field_value if len(str(field_value)) < 1000 else 'Too large to show'
-                    }
-        
-        return jsonify({
-            'analysis': analysis,
-            'recommendations': [
-                'Check if arrays are stored as strings that need parsing',
-                'Check if Python processing is actually creating the arrays',
-                'Verify save_to_database_as_json is working correctly'
-            ]
-        })
-        
-    except Exception as e:
-        return jsonify({
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }), 500
-
-@app.route('/api/transactions', methods=['GET'])
-def get_transactions():
-    """Get transactions data - FIXED VERSION"""
-    try:
-        logger.info("🔍 Starting /api/transactions request...")
-        
-        # Get query parameters for filtering
-        department = request.args.get('department')
-        region = request.args.get('region')
-        status = request.args.get('status')
-        category = request.args.get('category')
-        
-        logger.info(f"🔍 Filters: department={department}, region={region}, status={status}, category={category}")
-        
-        # Get the complete transactions data from database
-        try:
-            transactions_data = get_processed_data_from_database("transactions")
-            logger.info(f"✅ Loaded transactions data from database: {type(transactions_data)}")
-            
-            # Parse any JSON string fields that might exist
-            transactions_data = safe_parse_json_fields(transactions_data)
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to load transactions: {str(e)}")
-            return jsonify({
-                "transactions": [],
-                "parked_measures": [],
-                "direct_costs": [],
-                "booked_measures": [],
-                "error": "Could not load transactions data",
-                "message": str(e)
-            }), 500
-        
-        # ✅ CRITICAL FIX: Extract arrays with proper parsing for ALL arrays
-        all_transactions = transactions_data.get('transactions', [])
-        parked_measures = transactions_data.get('parked_measures', [])
-        direct_costs = transactions_data.get('direct_costs', [])
-        booked_measures = transactions_data.get('booked_measures', [])
-        outliers = transactions_data.get('outliers', [])
-        placeholders = transactions_data.get('placeholders', [])
-        statistics = transactions_data.get('statistics', {})
-
-        # ✅ STEP 1: Parse string representations if needed for ALL arrays
-        def ensure_list(data, array_name):
-            if isinstance(data, str):
-                try:
-                    parsed = parse_python_string_to_list(data)
-                    logger.info(f"✅ Parsed {array_name} from string: {len(parsed)} items")
-                    return parsed
-                except Exception as e:
-                    logger.error(f"❌ Failed to parse {array_name}: {e}")
-                    return []
-            elif isinstance(data, list):
-                logger.info(f"✅ {array_name} already a list: {len(data)} items")
-                return data
-            else:
-                logger.warning(f"⚠️ {array_name} is unexpected type: {type(data)}")
-                return []
-
-        # Apply parsing to ALL arrays
-        all_transactions = ensure_list(all_transactions, "transactions")
-        parked_measures = ensure_list(parked_measures, "parked_measures")
-        direct_costs = ensure_list(direct_costs, "direct_costs")
-        booked_measures = ensure_list(booked_measures, "booked_measures")
-        outliers = ensure_list(outliers, "outliers")
-        placeholders = ensure_list(placeholders, "placeholders")
-
-        # ✅ STEP 2: If transactions array is STILL empty, rebuild it from components
-        if len(all_transactions) == 0 and (len(direct_costs) > 0 or len(booked_measures) > 0 or len(parked_measures) > 0):
-            logger.info("🔧 FIXING: transactions array is empty, rebuilding from component arrays...")
-            
-            # Rebuild the complete transactions array from components
-            all_transactions = []
-            
-            # Add direct costs
-            if direct_costs:
-                all_transactions.extend(direct_costs)
-                logger.info(f"✅ Added {len(direct_costs)} direct costs to transactions")
-            
-            # Add booked measures  
-            if booked_measures:
-                all_transactions.extend(booked_measures)
-                logger.info(f"✅ Added {len(booked_measures)} booked measures to transactions")
-            
-            # Add parked measures
-            if parked_measures:
-                all_transactions.extend(parked_measures)
-                logger.info(f"✅ Added {len(parked_measures)} parked measures to transactions")
-            
-            # Add outliers if they exist
-            if outliers:
-                all_transactions.extend(outliers)
-                logger.info(f"✅ Added {len(outliers)} outliers to transactions")
-            
-            # Add placeholders if they exist
-            if placeholders:
-                all_transactions.extend(placeholders)
-                logger.info(f"✅ Added {len(placeholders)} placeholders to transactions")
-            
-            logger.info(f"🔧 FIXED: Rebuilt transactions array with {len(all_transactions)} total transactions")
-
-        logger.info(f"📊 FINAL COUNTS: all={len(all_transactions)}, parked={len(parked_measures)}, direct={len(direct_costs)}, booked={len(booked_measures)}, outliers={len(outliers)}")
-
-        # ✅ STEP 3: Validate the arrays contain correct data types
-        def validate_array_content(array, array_name):
-            if len(array) > 0:
-                sample = array[0]
-                if isinstance(sample, dict):
-                    logger.info(f"✅ {array_name} contains proper dict objects")
-                    if 'category' in sample:
-                        categories = list(set([item.get('category', 'NO_CATEGORY') for item in array[:100]]))  # Check first 100
-                        logger.info(f"✅ {array_name} categories: {categories}")
-                else:
-                    logger.warning(f"⚠️ {array_name} contains {type(sample)} instead of dict")
-
-        validate_array_content(all_transactions, "all_transactions")
-        validate_array_content(parked_measures, "parked_measures") 
-        validate_array_content(direct_costs, "direct_costs")
-        validate_array_content(booked_measures, "booked_measures")
-        
-        # Apply filters to the main transactions array (which contains all transaction types)
-        filtered_transactions = all_transactions
-        
-        if department:
-            filtered_transactions = [
-                tx for tx in filtered_transactions 
-                if tx.get('department') == department
-            ]
-            logger.info(f"🔍 After department filter '{department}': {len(filtered_transactions)} transactions")
-        
-        if region:
-            filtered_transactions = [
-                tx for tx in filtered_transactions 
-                if tx.get('region') == region
-            ]
-            logger.info(f"🔍 After region filter '{region}': {len(filtered_transactions)} transactions")
-        
-        if status:
-            filtered_transactions = [
-                tx for tx in filtered_transactions 
-                if tx.get('status') == status
-            ]
-            logger.info(f"🔍 After status filter '{status}': {len(filtered_transactions)} transactions")
-        
-        if category:
-            filtered_transactions = [
-                tx for tx in filtered_transactions 
-                if tx.get('category') == category
-            ]
-            logger.info(f"🔍 After category filter '{category}': {len(filtered_transactions)} transactions")
-        
-        # Also filter parked_measures if department filter is applied (this is what your components need)
-        filtered_parked_measures = parked_measures
-        if department:
-            filtered_parked_measures = [
-                measure for measure in parked_measures 
-                if measure.get('department') == department
-            ]
-            logger.info(f"🔍 Filtered parked measures for '{department}': {len(filtered_parked_measures)} measures")
-        
-        # Build comprehensive response based on your processing code structure
-        response_data = {
-            # Main transactions array (filtered)
-            "transactions": filtered_transactions,
-            
-            # Separate arrays for specific use cases (important for your components)
-            "parked_measures": filtered_parked_measures,
-            "direct_costs": direct_costs,
-            "booked_measures": booked_measures,
-            "outliers": outliers,
-            "placeholders": placeholders,
-            
-            # Statistics from processing
-            "statistics": statistics,
-            
-            # Summary information
-            "summary": {
-                "total_transactions": len(all_transactions),
-                "filtered_transactions": len(filtered_transactions),
-                "by_category": {
-                    "DIRECT_COST": len([tx for tx in all_transactions if tx.get('category') == 'DIRECT_COST']),
-                    "BOOKED_MEASURE": len([tx for tx in all_transactions if tx.get('category') == 'BOOKED_MEASURE']),
-                    "PARKED_MEASURE": len([tx for tx in all_transactions if tx.get('category') == 'PARKED_MEASURE']),
-                    "UNASSIGNED_MEASURE": len([tx for tx in all_transactions if tx.get('category') == 'UNASSIGNED_MEASURE']),
-                    "OUTLIER": len([tx for tx in all_transactions if tx.get('category') == 'OUTLIER'])
-                },
-                "by_budget_impact": {
-                    "Booked": len([tx for tx in all_transactions if tx.get('budget_impact') == 'Booked']),
-                    "Reserved": len([tx for tx in all_transactions if tx.get('budget_impact') == 'Reserved']),
-                    "None": len([tx for tx in all_transactions if tx.get('budget_impact') == 'None'])
-                },
-                "by_location_type": {
-                    "Floor": len([tx for tx in all_transactions if tx.get('location_type') == 'Floor']),
-                    "HQ": len([tx for tx in all_transactions if tx.get('location_type') == 'HQ']),
-                    "Unknown": len([tx for tx in all_transactions if tx.get('location_type') == 'Unknown'])
-                }
-            },
-            
-            # Filters that were applied
-            "filters_applied": {
-                "department": department,
-                "region": region,
-                "status": status,
-                "category": category
-            },
-            
-            # Processing metadata
-            "processing_date": transactions_data.get('processing_date'),
-            "data_source": "Azure SQL Database"
-        }
-        
-        logger.info(f"🎯 Returning {len(filtered_transactions)} transactions with {len(filtered_parked_measures)} parked measures")
-        
-        return jsonify(response_data)
-        
-    except Exception as e:
-        logger.error(f"❌ Error in /api/transactions: {str(e)}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({
-            "transactions": [],
-            "parked_measures": [],
-            "direct_costs": [],
-            "booked_measures": [],
-            "error": "Failed to fetch transactions",
-            "message": str(e)
-        }), 500
-
-@app.route('/api/transactions-fixed', methods=['GET'])
-def get_transactions_fixed():
-    """
-    FIXED VERSION: Get transactions with proper parsing and debugging
-    """
-    try:
-        logger.info("🔍 Starting FIXED /api/transactions request...")
-        
-        # Get query parameters
-        department = request.args.get('department')
-        region = request.args.get('region')
-        status = request.args.get('status')
-        category = request.args.get('category')
-        
-        logger.info(f"🔍 Filters: department={department}, region={region}, status={status}, category={category}")
-        
-        # Get raw data from database
-        try:
-            raw_transactions_data = get_processed_data_from_database("transactions")
-            logger.info(f"✅ Raw data type: {type(raw_transactions_data)}")
-            
-            if isinstance(raw_transactions_data, dict):
-                logger.info(f"✅ Raw data keys: {list(raw_transactions_data.keys())}")
-                
-                # Check the transactions field specifically
-                trans_field = raw_transactions_data.get('transactions')
-                logger.info(f"✅ Transactions field type: {type(trans_field)}")
-                
-                if isinstance(trans_field, str):
-                    logger.info(f"✅ Transactions field is string, first 200 chars: {trans_field[:200]}...")
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to load raw transactions: {str(e)}")
-            return jsonify({
-                "error": "Could not load raw transactions data",
-                "message": str(e)
-            }), 500
-        
-        # Parse the data using FIXED function
-        try:
-            parsed_transactions_data = safe_parse_json_fields(raw_transactions_data.copy())
-            logger.info(f"✅ Parsed data successfully")
-            
-            # Validate parsing worked
-            transactions = parsed_transactions_data.get('transactions', [])
-            logger.info(f"✅ Parsed transactions type: {type(transactions)}")
-            logger.info(f"✅ Parsed transactions count: {len(transactions) if isinstance(transactions, list) else 'NOT A LIST'}")
-            
-            if isinstance(transactions, list) and len(transactions) > 0:
-                sample_tx = transactions[0]
-                logger.info(f"✅ Sample transaction type: {type(sample_tx)}")
-                if isinstance(sample_tx, dict):
-                    logger.info(f"✅ Sample transaction keys: {list(sample_tx.keys())}")
-                    logger.info(f"✅ Sample category: {sample_tx.get('category', 'NO_CATEGORY')}")
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to parse transactions: {str(e)}")
-            return jsonify({
-                "error": "Could not parse transactions data",
-                "message": str(e),
-                "raw_data_type": type(raw_transactions_data).__name__
-            }), 500
-        
-        # ✅ CRITICAL FIX: Extract arrays with proper parsing for ALL arrays
-        all_transactions = parsed_transactions_data.get('transactions', [])
-        parked_measures = parsed_transactions_data.get('parked_measures', [])
-        direct_costs = parsed_transactions_data.get('direct_costs', [])
-        booked_measures = parsed_transactions_data.get('booked_measures', [])
-        outliers = parsed_transactions_data.get('outliers', [])
-        placeholders = parsed_transactions_data.get('placeholders', [])
-        statistics = parsed_transactions_data.get('statistics', {})
-
-        # ✅ STEP 1: Parse string representations if needed for ALL arrays
-        def ensure_list(data, array_name):
-            if isinstance(data, str):
-                try:
-                    parsed = parse_python_string_to_list(data)
-                    logger.info(f"✅ Parsed {array_name} from string: {len(parsed)} items")
-                    return parsed
-                except Exception as e:
-                    logger.error(f"❌ Failed to parse {array_name}: {e}")
-                    return []
-            elif isinstance(data, list):
-                logger.info(f"✅ {array_name} already a list: {len(data)} items")
-                return data
-            else:
-                logger.warning(f"⚠️ {array_name} is unexpected type: {type(data)}")
-                return []
-
-        # Apply parsing to ALL arrays
-        all_transactions = ensure_list(all_transactions, "transactions")
-        parked_measures = ensure_list(parked_measures, "parked_measures")
-        direct_costs = ensure_list(direct_costs, "direct_costs")
-        booked_measures = ensure_list(booked_measures, "booked_measures")
-        outliers = ensure_list(outliers, "outliers")
-        placeholders = ensure_list(placeholders, "placeholders")
-
-        # ✅ STEP 2: If transactions array is STILL empty, rebuild it from components
-        if len(all_transactions) == 0 and (len(direct_costs) > 0 or len(booked_measures) > 0 or len(parked_measures) > 0):
-            logger.info("🔧 FIXING: transactions array is empty, rebuilding from component arrays...")
-            
-            # Rebuild the complete transactions array from components
-            all_transactions = []
-            
-            # Add direct costs
-            if direct_costs:
-                all_transactions.extend(direct_costs)
-                logger.info(f"✅ Added {len(direct_costs)} direct costs to transactions")
-            
-            # Add booked measures  
-            if booked_measures:
-                all_transactions.extend(booked_measures)
-                logger.info(f"✅ Added {len(booked_measures)} booked measures to transactions")
-            
-            # Add parked measures
-            if parked_measures:
-                all_transactions.extend(parked_measures)
-                logger.info(f"✅ Added {len(parked_measures)} parked measures to transactions")
-            
-            # Add outliers if they exist
-            if outliers:
-                all_transactions.extend(outliers)
-                logger.info(f"✅ Added {len(outliers)} outliers to transactions")
-            
-            # Add placeholders if they exist
-            if placeholders:
-                all_transactions.extend(placeholders)
-                logger.info(f"✅ Added {len(placeholders)} placeholders to transactions")
-            
-            logger.info(f"🔧 FIXED: Rebuilt transactions array with {len(all_transactions)} total transactions")
-
-        logger.info(f"📊 FINAL COUNTS: all={len(all_transactions)}, parked={len(parked_measures)}, direct={len(direct_costs)}, booked={len(booked_measures)}, outliers={len(outliers)}")
-
-        # ✅ STEP 3: Validate the arrays contain correct data types
-        def validate_array_content(array, array_name):
-            if len(array) > 0:
-                sample = array[0]
-                if isinstance(sample, dict):
-                    logger.info(f"✅ {array_name} contains proper dict objects")
-                    if 'category' in sample:
-                        categories = list(set([item.get('category', 'NO_CATEGORY') for item in array[:100]]))  # Check first 100
-                        logger.info(f"✅ {array_name} categories: {categories}")
-                else:
-                    logger.warning(f"⚠️ {array_name} contains {type(sample)} instead of dict")
-
-        validate_array_content(all_transactions, "all_transactions")
-        validate_array_content(parked_measures, "parked_measures") 
-        validate_array_content(direct_costs, "direct_costs")
-        validate_array_content(booked_measures, "booked_measures")
-        
-        # Apply filters
-        filtered_transactions = all_transactions
-        
-        if department:
-            filtered_transactions = [tx for tx in filtered_transactions if tx.get('department') == department]
-            logger.info(f"🔍 After department filter: {len(filtered_transactions)} transactions")
-        
-        if region:
-            filtered_transactions = [tx for tx in filtered_transactions if tx.get('region') == region]
-            logger.info(f"🔍 After region filter: {len(filtered_transactions)} transactions")
-        
-        if status:
-            filtered_transactions = [tx for tx in filtered_transactions if tx.get('status') == status]
-            logger.info(f"🔍 After status filter: {len(filtered_transactions)} transactions")
-        
-        if category:
-            filtered_transactions = [tx for tx in filtered_transactions if tx.get('category') == category]
-            logger.info(f"🔍 After category filter: {len(filtered_transactions)} transactions")
-        
-        # Filter parked measures
-        filtered_parked_measures = parked_measures
-        if department:
-            filtered_parked_measures = [measure for measure in parked_measures if measure.get('department') == department]
-        
-        # Build response
-        response_data = {
-            "transactions": filtered_transactions,
-            "parked_measures": filtered_parked_measures,
-            "direct_costs": direct_costs,
-            "booked_measures": booked_measures,
-            "outliers": outliers,
-            "placeholders": placeholders,
-            "statistics": statistics,
-            "summary": {
-                "total_transactions": len(all_transactions),
-                "filtered_transactions": len(filtered_transactions),
-                "parsing_success": True,
-                "raw_data_type": type(raw_transactions_data).__name__,
-                "by_category": {
-                    "DIRECT_COST": len([tx for tx in all_transactions if tx.get('category') == 'DIRECT_COST']),
-                    "BOOKED_MEASURE": len([tx for tx in all_transactions if tx.get('category') == 'BOOKED_MEASURE']),
-                    "PARKED_MEASURE": len([tx for tx in all_transactions if tx.get('category') == 'PARKED_MEASURE']),
-                    "UNASSIGNED_MEASURE": len([tx for tx in all_transactions if tx.get('category') == 'UNASSIGNED_MEASURE']),
-                    "OUTLIER": len([tx for tx in all_transactions if tx.get('category') == 'OUTLIER'])
-                }
-            },
-            "filters_applied": {
-                "department": department,
-                "region": region,
-                "status": status,
-                "category": category
-            },
-            "debug_info": {
-                "endpoint": "FIXED VERSION",
-                "parsing_method": "safe_parse_json_fields_FIXED",
-                "arrays_rebuilt": len(all_transactions) > 0
-            }
-        }
-        
-        logger.info(f"🎯 Returning FIXED response with {len(filtered_transactions)} transactions")
-        
-        return jsonify(response_data)
-        
-    except Exception as e:
-        logger.error(f"❌ Error in FIXED transactions endpoint: {str(e)}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({
-            "error": "Failed to fetch transactions (FIXED version)",
-            "message": str(e)
-        }), 500
-
 @app.route('/api/assign-measure', methods=['POST'])
 def assign_measure():
     """Manually assign a parked measure to a region/district, or unassign"""
@@ -1435,7 +433,7 @@ def assign_measure():
         
         # Get the current transactions from database
         transactions = get_processed_data_from_database("transactions")
-        transactions = safe_parse_json_fields(transactions) 
+        transactions = safe_parse_json_fields_WORKING(transactions) 
         
         # Find the measure to update
         measure_found = False
@@ -1614,59 +612,6 @@ def database_status():
             "timestamp": datetime.now().isoformat()
         }), 500
 
-@app.route('/api/debug-data', methods=['GET'])
-def debug_data():
-    """Debug endpoint to see what's actually in the database"""
-    try:
-        logger.info("🔍 DEBUG: Starting debug data check...")
-        
-        # Check what's actually in the database for each table
-        debug_info = {}
-        
-        # Check frontend_departments
-        try:
-            departments_data = get_processed_data_from_database("frontend_departments")
-            debug_info['frontend_departments'] = {
-                'exists': departments_data is not None,
-                'type': type(departments_data).__name__,
-                'keys': list(departments_data.keys()) if isinstance(departments_data, dict) else 'N/A'
-            }
-        except Exception as e:
-            debug_info['frontend_departments'] = {'error': str(e)}
-        
-        # Check frontend_regions  
-        try:
-            regions_data = get_processed_data_from_database("frontend_regions")
-            debug_info['frontend_regions'] = {
-                'exists': regions_data is not None,
-                'type': type(regions_data).__name__,
-                'keys': list(regions_data.keys()) if isinstance(regions_data, dict) else 'N/A'
-            }
-        except Exception as e:
-            debug_info['frontend_regions'] = {'error': str(e)}
-        
-        # Check transactions
-        try:
-            transactions_data = get_processed_data_from_database("transactions")
-            debug_info['transactions'] = {
-                'exists': transactions_data is not None,
-                'type': type(transactions_data).__name__,
-                'has_transactions': 'transactions' in transactions_data if isinstance(transactions_data, dict) else False,
-                'keys': list(transactions_data.keys()) if isinstance(transactions_data, dict) else 'N/A'
-            }
-        except Exception as e:
-            debug_info['transactions'] = {'error': str(e)}
-        
-        return jsonify({
-            'debug_info': debug_info,
-            'timestamp': datetime.now().isoformat(),
-            'status': 'debug_complete'
-        })
-        
-    except Exception as e:
-        logger.error(f"❌ Debug endpoint error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint for database version"""
@@ -1691,7 +636,7 @@ def health_check():
         
         return jsonify({
             "status": status,
-            "version": "2.0.0 (Database)",
+            "version": "2.1.0 (Database + Fixed Parsing)",
             "database": {
                 "connected": db_connected,
                 "password_configured": db_password_set,
