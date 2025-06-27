@@ -559,6 +559,220 @@ def get_transactions_simple_fix():
             "message": str(e)
         }), 500
 
+@app.route('/api/database-inspector', methods=['GET'])
+def database_inspector():
+    """
+    Inspect the raw database content to see what's actually stored
+    """
+    try:
+        logger.info("🔍 Starting database inspection...")
+        
+        # Get the database manager
+        db_mgr = get_db_manager()
+        
+        # Query the processing_results table directly
+        query = text("""
+            SELECT 
+                result_type,
+                LEN(data) as data_length,
+                LEFT(data, 500) as data_preview,
+                created_at
+            FROM processing_results 
+            WHERE result_type IN ('transactions', 'frontend_departments', 'frontend_regions')
+            ORDER BY result_type, created_at DESC
+        """)
+        
+        inspection_results = {}
+        
+        with db_mgr.engine.connect() as conn:
+            results = conn.execute(query).fetchall()
+            
+            for result in results:
+                result_type = result[0]
+                data_length = result[1]
+                data_preview = result[2]
+                created_at = result[3]
+                
+                if result_type not in inspection_results:
+                    inspection_results[result_type] = []
+                
+                inspection_results[result_type].append({
+                    'data_length': data_length,
+                    'data_preview': data_preview,
+                    'created_at': str(created_at),
+                    'preview_analysis': analyze_data_preview(data_preview)
+                })
+        
+        # Also get a more detailed look at the transactions data specifically
+        transactions_detail = None
+        try:
+            raw_transactions = get_processed_data_from_database("transactions")
+            if raw_transactions:
+                transactions_detail = {
+                    'type': type(raw_transactions).__name__,
+                    'keys': list(raw_transactions.keys()) if isinstance(raw_transactions, dict) else 'Not a dict',
+                    'field_analysis': {}
+                }
+                
+                if isinstance(raw_transactions, dict):
+                    for key in ['transactions', 'booked_measures', 'parked_measures', 'direct_costs', 'statistics']:
+                        if key in raw_transactions:
+                            field_value = raw_transactions[key]
+                            transactions_detail['field_analysis'][key] = {
+                                'type': type(field_value).__name__,
+                                'is_string': isinstance(field_value, str),
+                                'length': len(field_value) if hasattr(field_value, '__len__') else 'No length',
+                                'preview': str(field_value)[:200] if field_value else 'Empty/None',
+                                'contains_list_indicators': '[' in str(field_value) and ']' in str(field_value)
+                            }
+        except Exception as e:
+            transactions_detail = {'error': str(e)}
+        
+        return jsonify({
+            'database_inspection': inspection_results,
+            'transactions_detail': transactions_detail,
+            'inspection_time': datetime.now().isoformat(),
+            'recommendations': generate_recommendations(inspection_results, transactions_detail)
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Database inspection error: {str(e)}")
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+def analyze_data_preview(data_preview):
+    """Analyze the data preview to understand the format"""
+    if not data_preview:
+        return {'type': 'empty', 'format': 'unknown'}
+    
+    analysis = {
+        'starts_with_bracket': data_preview.strip().startswith('['),
+        'starts_with_brace': data_preview.strip().startswith('{'),
+        'contains_transactions': 'transactions' in data_preview.lower(),
+        'contains_category': 'category' in data_preview.lower(),
+        'contains_booked_measure': 'BOOKED_MEASURE' in data_preview,
+        'contains_parked_measure': 'PARKED_MEASURE' in data_preview,
+        'contains_direct_cost': 'DIRECT_COST' in data_preview,
+        'likely_format': 'unknown'
+    }
+    
+    if analysis['starts_with_bracket']:
+        analysis['likely_format'] = 'json_array'
+    elif analysis['starts_with_brace']:
+        analysis['likely_format'] = 'json_object'
+    elif data_preview.strip().startswith("'") or data_preview.strip().startswith('"'):
+        analysis['likely_format'] = 'string_representation'
+    
+    return analysis
+
+def generate_recommendations(inspection_results, transactions_detail):
+    """Generate recommendations based on inspection results"""
+    recommendations = []
+    
+    if transactions_detail and 'field_analysis' in transactions_detail:
+        field_analysis = transactions_detail['field_analysis']
+        
+        # Check if booked_measures exists and is a string
+        if 'booked_measures' in field_analysis:
+            booked_info = field_analysis['booked_measures']
+            if booked_info['is_string'] and booked_info['length'] > 10:
+                recommendations.append({
+                    'issue': 'booked_measures is stored as string',
+                    'solution': 'Need to parse the string representation in the API',
+                    'priority': 'HIGH'
+                })
+            elif booked_info['length'] == 0 or booked_info['preview'] in ['[]', '""', "''", 'None']:
+                recommendations.append({
+                    'issue': 'booked_measures is empty in database',
+                    'solution': 'Need to check Python data processing - booked measures are not being saved',
+                    'priority': 'CRITICAL'
+                })
+        
+        # Check if parked_measures exists and is a string
+        if 'parked_measures' in field_analysis:
+            parked_info = field_analysis['parked_measures']
+            if parked_info['is_string'] and parked_info['length'] > 10:
+                recommendations.append({
+                    'issue': 'parked_measures is stored as string',
+                    'solution': 'Need to parse the string representation in the API',
+                    'priority': 'HIGH'
+                })
+            elif parked_info['length'] == 0 or parked_info['preview'] in ['[]', '""', "''", 'None']:
+                recommendations.append({
+                    'issue': 'parked_measures is empty in database',
+                    'solution': 'Need to check Python data processing - parked measures are not being saved',
+                    'priority': 'CRITICAL'
+                })
+        
+        # Check main transactions array
+        if 'transactions' in field_analysis:
+            trans_info = field_analysis['transactions']
+            if trans_info['length'] == 0 or trans_info['preview'] in ['[]', '""', "''", 'None']:
+                recommendations.append({
+                    'issue': 'Main transactions array is empty',
+                    'solution': 'Python processing is not building the complete transactions array',
+                    'priority': 'CRITICAL'
+                })
+    
+    # Check statistics vs data mismatch
+    if transactions_detail and 'field_analysis' in transactions_detail:
+        if 'statistics' in transactions_detail['field_analysis']:
+            recommendations.append({
+                'issue': 'Statistics show data exists but arrays are empty',
+                'solution': 'Statistics calculated correctly but transaction arrays not saved properly',
+                'priority': 'HIGH',
+                'action': 'Check save_to_database_as_json function in Python code'
+            })
+    
+    return recommendations
+
+
+# Add this simpler endpoint to check what gets returned by get_processed_data_from_database
+@app.route('/api/raw-database-data', methods=['GET'])
+def raw_database_data():
+    """
+    Get the exact raw data that get_processed_data_from_database returns
+    """
+    try:
+        raw_data = get_processed_data_from_database("transactions")
+        
+        analysis = {
+            'raw_data_type': type(raw_data).__name__,
+            'raw_data_keys': list(raw_data.keys()) if isinstance(raw_data, dict) else 'Not a dict',
+            'raw_data_size': len(str(raw_data)),
+            'field_details': {}
+        }
+        
+        if isinstance(raw_data, dict):
+            for key in ['transactions', 'booked_measures', 'parked_measures', 'direct_costs', 'statistics']:
+                if key in raw_data:
+                    field_value = raw_data[key]
+                    analysis['field_details'][key] = {
+                        'type': type(field_value).__name__,
+                        'length': len(field_value) if hasattr(field_value, '__len__') else 'No length',
+                        'is_empty': not bool(field_value),
+                        'preview': str(field_value)[:300],
+                        'full_value_if_small': field_value if len(str(field_value)) < 1000 else 'Too large to show'
+                    }
+        
+        return jsonify({
+            'analysis': analysis,
+            'recommendations': [
+                'Check if arrays are stored as strings that need parsing',
+                'Check if Python processing is actually creating the arrays',
+                'Verify save_to_database_as_json is working correctly'
+            ]
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/api/transactions', methods=['GET'])
 def get_transactions():
     """Get transactions data - FIXED VERSION"""
