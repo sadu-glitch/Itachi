@@ -3,7 +3,7 @@ import numpy as np
 import re
 import json
 import os
-from datetime import datetime, date
+from datetime import datetime
 import logging
 import concurrent.futures
 import functools
@@ -12,6 +12,21 @@ import time
 import pyodbc
 from sqlalchemy import create_engine, text
 from urllib.parse import quote_plus
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("msp_sap_integration")
+
+# Database connection parameters
+DB_SERVER = "msp-sap-database-sadu.database.windows.net"
+DB_NAME = "Marketing"
+DB_USER = "msp_admin"
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+
+# Constants
+BATCH_SIZE = 1000
+MAX_WORKERS = 8
+CACHE_EXPIRY = 3600
 
 # [Your existing helper functions - keeping them unchanged]
 def safe_float_conversion(value):
@@ -82,11 +97,198 @@ def safe_get(row, column, default=None):
         return default
     return row[column]
 
-# FIXED: Enhanced make_json_serializable function to handle date objects
+
+
+class DatabaseManager:
+    """
+    Manages database connections and operations with FIXED date handling
+    """
+    
+    def __init__(self):
+        self.connection_string = None
+        self.engine = None
+        self._setup_connection()
+    
+    def _setup_connection(self):
+        """Setup database connection string and SQLAlchemy engine"""
+        try:
+            # Validate that password is set
+            if not DB_PASSWORD:
+                raise ValueError("DB_PASSWORD environment variable is not set or is empty")
+            
+            # Build connection string for pyodbc
+            self.connection_string = (
+                f"DRIVER={{ODBC Driver 18 for SQL Server}};"
+                f"SERVER={DB_SERVER};"
+                f"DATABASE={DB_NAME};"
+                f"UID={DB_USER};"
+                f"PWD={DB_PASSWORD};"
+                f"Encrypt=yes;"
+                f"TrustServerCertificate=no;"
+                f"Connection Timeout=30;"
+            )
+            
+            # Build SQLAlchemy connection string
+            quoted_password = quote_plus(str(DB_PASSWORD))
+            sqlalchemy_url = (
+                f"mssql+pyodbc://{DB_USER}:{quoted_password}@{DB_SERVER}/{DB_NAME}"
+                f"?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=no"
+            )
+            
+            self.engine = create_engine(sqlalchemy_url, fast_executemany=True)
+            logger.info("✅ Database connection configured successfully")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to setup database connection: {str(e)}")
+            raise
+    
+    def test_connection(self):
+        """Test the database connection"""
+        try:
+            with self.engine.connect() as conn:
+                result = conn.execute(text("SELECT 1 as test")).fetchone()
+                logger.info("✅ Database connection test successful")
+                return True
+        except Exception as e:
+            logger.error(f"❌ Database connection test failed: {str(e)}")
+            return False
+    
+    def get_latest_batch_id(self, table_name: str, batch_pattern: str) -> str:
+        """Get the most recent batch_id for a table"""
+        try:
+            query = text(f"""
+                SELECT TOP 1 batch_id 
+                FROM {table_name} 
+                WHERE batch_id LIKE :pattern 
+                ORDER BY upload_date DESC, batch_id DESC
+            """)
+            
+            with self.engine.connect() as conn:
+                result = conn.execute(query, {"pattern": batch_pattern}).fetchone()
+                if result:
+                    logger.info(f"Latest batch for {table_name}: {result[0]}")
+                    return result[0]
+                else:
+                    logger.warning(f"No batches found for {table_name} with pattern {batch_pattern}")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"Error getting latest batch for {table_name}: {str(e)}")
+            raise
+    
+    def read_table_as_dataframe(self, table_name: str, batch_id: str = None, column_mapping: dict = None) -> pd.DataFrame:
+        """
+        🔧 FIXED: Read table data as pandas DataFrame with FORCED STRING DTYPES for date columns
+        This prevents pandas from auto-converting ISO date strings to datetime objects
+        """
+        try:
+            # Build the query
+            if batch_id:
+                query = f"SELECT * FROM {table_name} WHERE batch_id = '{batch_id}'"
+            else:
+                query = f"SELECT * FROM {table_name}"
+            
+            # 🔧 FIX #1: Define dtype mapping to force ALL date columns to stay as strings
+            # This prevents pandas from converting "2025-05-27" → datetime.date(2025, 5, 27)
+            
+            # Define known date columns that should NEVER be converted
+            date_columns_to_preserve = [
+                'datum',           # MSP date field
+                'anfangsdatum',    # MSP start date
+                'enddatum',        # MSP end date
+                'buchungsdatum',   # SAP booking date
+                'upload_date',     # System upload date
+                'created_at',      # System created date
+                'processing_date'  # System processing date
+            ]
+            
+            # 🔧 FIX #2: Create dtype dictionary to force string type for ALL potential date columns
+            dtype_dict = {}
+            
+            # First, read just the column names to see what we're dealing with
+            with self.engine.connect() as conn:
+                # Get column information
+                column_query = text(f"""
+                    SELECT COLUMN_NAME, DATA_TYPE 
+                    FROM INFORMATION_SCHEMA.COLUMNS 
+                    WHERE TABLE_NAME = :table_name
+                """)
+                
+                # Extract table name without schema if needed
+                clean_table_name = table_name.split('.')[-1] if '.' in table_name else table_name
+                
+                columns_info = conn.execute(column_query, {"table_name": clean_table_name}).fetchall()
+                
+                # Force string dtype for known date columns AND any datetime-type columns
+                for col_name, col_type in columns_info:
+                    col_name_lower = col_name.lower()
+                    col_type_lower = col_type.lower()
+                    
+                    # Force string for known date columns
+                    if col_name_lower in [dc.lower() for dc in date_columns_to_preserve]:
+                        dtype_dict[col_name] = 'string'
+                        logger.info(f"🔧 Forcing {col_name} to string type (known date column)")
+                    
+                    # Force string for any SQL datetime/date type columns
+                    elif any(dt in col_type_lower for dt in ['date', 'time', 'timestamp']):
+                        dtype_dict[col_name] = 'string'
+                        logger.info(f"🔧 Forcing {col_name} to string type (SQL date type: {col_type})")
+            
+            # 🔧 FIX #3: Read data with forced string dtypes for date columns
+            logger.info(f"📊 Reading {table_name} with {len(dtype_dict)} forced string columns...")
+            
+            df = pd.read_sql_query(
+                query, 
+                self.engine,
+                dtype=dtype_dict  # 🔧 This forces date columns to stay as strings!
+            )
+            
+            # 🔧 FIX #4: Double-check and convert any remaining datetime objects to strings
+            for col in df.columns:
+                if df[col].dtype == 'object':
+                    # Check if this column contains datetime objects
+                    sample_non_null = df[col].dropna()
+                    if len(sample_non_null) > 0:
+                        first_val = sample_non_null.iloc[0]
+                        
+                        # If it's a datetime-like object, convert the entire column to string
+                        if hasattr(first_val, 'strftime') or str(type(first_val)) in ['<class \'datetime.date\'>', '<class \'datetime.datetime\'>', '<class \'pandas._libs.tslibs.timestamps.Timestamp\'>']:
+                            logger.info(f"🔧 Converting remaining datetime objects in {col} to strings")
+                            df[col] = df[col].apply(lambda x: x.strftime('%Y-%m-%d') if (pd.notna(x) and hasattr(x, 'strftime')) else str(x) if pd.notna(x) else x)
+            
+            # CRITICAL: Create a completely independent copy to break any database references
+            df = df.copy(deep=True)
+            
+            # Apply column mapping if provided (to maintain compatibility with existing code)
+            if column_mapping:
+                df = df.rename(columns=column_mapping)
+            
+            # CRITICAL: Reset index and ensure clean DataFrame
+            df = df.reset_index(drop=True)
+            
+            # 🔧 FIX #5: Log sample date values to verify they're strings
+            for col in df.columns:
+                col_lower = col.lower()
+                if any(date_term in col_lower for date_term in ['datum', 'date', 'zeit', 'time']):
+                    sample_vals = df[col].dropna().head(3).tolist()
+                    logger.info(f"📅 Date column {col} sample values: {sample_vals} (types: {[type(v).__name__ for v in sample_vals]})")
+            
+            logger.info(f"✅ Read {len(df)} records from {table_name} with proper string date handling")
+            return df
+            
+        except Exception as e:
+            logger.error(f"❌ Error reading {table_name}: {str(e)}")
+            raise
+
+
+# ==============================================================================
+# ENHANCED JSON SERIALIZATION - HANDLES ALL DATETIME OBJECTS
+# ==============================================================================
+
 def make_json_serializable(obj, _seen=None):
     """
-    Convert objects that are not JSON serializable to serializable formats
-    Added circular reference detection and proper date object handling
+    🔧 ENHANCED: Convert objects that are not JSON serializable to serializable formats
+    Now handles ALL datetime object types that might slip through
     """
     if _seen is None:
         _seen = set()
@@ -100,11 +302,14 @@ def make_json_serializable(obj, _seen=None):
         _seen.add(obj_id)
     
     try:
-        # FIXED: Handle datetime.date objects (the main culprit)
-        if isinstance(obj, date):
+        # 🔧 FIX #6: Handle ALL possible datetime object types
+        if isinstance(obj, pd.Timestamp):
             return obj.strftime('%Y-%m-%d')
-        elif isinstance(obj, pd.Timestamp):
-            return obj.strftime('%Y-%m-%d %H:%M:%S')
+        elif hasattr(obj, 'strftime'):  # This catches datetime.date, datetime.datetime, etc.
+            return obj.strftime('%Y-%m-%d')
+        elif str(type(obj)) in ['<class \'datetime.date\'>', '<class \'datetime.datetime\'>']:
+            # Fallback for datetime objects
+            return obj.strftime('%Y-%m-%d') if hasattr(obj, 'strftime') else str(obj)
         elif isinstance(obj, pd.Series):
             # Convert Series to simple dict, avoiding circular references
             result = {}
@@ -175,21 +380,32 @@ def make_json_serializable(obj, _seen=None):
         else:
             return obj
     except Exception as e:
-        # If all else fails, convert to string
+        # 🔧 FIX #7: Enhanced fallback for any datetime-like objects
+        obj_str = str(obj)
+        if 'datetime.date(' in obj_str and ')' in obj_str:
+            # Extract date from string representation like "datetime.date(2025, 5, 27)"
+            try:
+                # Parse the datetime.date string format
+                import re
+                match = re.search(r'datetime\.date\((\d+),\s*(\d+),\s*(\d+)\)', obj_str)
+                if match:
+                    year, month, day = match.groups()
+                    return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+            except:
+                pass
+        
+        # Ultimate fallback
         return str(obj) if obj is not None else None
     finally:
         if obj_id in _seen:
             _seen.discard(obj_id)
 
+
 class JSONEncoder(json.JSONEncoder):
     """
-    Custom JSON encoder that handles pandas and numpy types with circular reference protection
+    🔧 ENHANCED: Custom JSON encoder that handles pandas and numpy types with enhanced datetime support
     """
     def default(self, obj):
-        # FIXED: Handle datetime.date objects first
-        if isinstance(obj, date):
-            return obj.strftime('%Y-%m-%d')
-        
         # Handle NaN, infinity, and -infinity
         if isinstance(obj, float):
             if np.isnan(obj):
@@ -199,164 +415,70 @@ class JSONEncoder(json.JSONEncoder):
             elif np.isinf(obj) and obj < 0:
                 return "-Infinity"
         
+        # 🔧 FIX #8: Enhanced datetime handling in JSON encoder
+        if hasattr(obj, 'strftime'):
+            return obj.strftime('%Y-%m-%d')
+        
         try:
             return make_json_serializable(obj)
         except Exception as e:
+            # Enhanced fallback for datetime objects
+            obj_str = str(obj)
+            if 'datetime.date(' in obj_str:
+                try:
+                    import re
+                    match = re.search(r'datetime\.date\((\d+),\s*(\d+),\s*(\d+)\)', obj_str)
+                    if match:
+                        year, month, day = match.groups()
+                        return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+                except:
+                    pass
+            
             # Ultimate fallback
             return str(obj) if obj is not None else None
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("msp_sap_integration")
 
-# -----------------------------------------------------------------------------
-# DATABASE CONNECTION AND CONFIGURATION
-# -----------------------------------------------------------------------------
+# ==============================================================================
+# VERIFICATION FUNCTION - CHECKS DATE HANDLING
+# ==============================================================================
 
-# Database connection parameters
-DB_SERVER = "msp-sap-database-sadu.database.windows.net"
-DB_NAME = "Marketing"
-DB_USER = "msp_admin"
-DB_PASSWORD = os.getenv("DB_PASSWORD")  # Set this environment variable
-
-# Constants
-BATCH_SIZE = 1000  # Number of records to process in a batch
-MAX_WORKERS = 8    # Maximum number of parallel workers
-CACHE_EXPIRY = 3600  # Cache expiry in seconds
-
-class DatabaseManager:
+def verify_date_handling_in_dataframe(df: pd.DataFrame, df_name: str) -> None:
     """
-    Manages database connections and operations
+    🔍 VERIFICATION: Check that all date columns are properly handled as strings
     """
+    logger.info(f"🔍 Verifying date handling in {df_name}...")
     
-    def __init__(self):
-        self.connection_string = None
-        self.engine = None
-        self._setup_connection()
+    date_columns = []
+    problematic_columns = []
     
-    def _setup_connection(self):
-        """Setup database connection string and SQLAlchemy engine"""
-        try:
-            # Validate that password is set
-            if not DB_PASSWORD:
-                raise ValueError("DB_PASSWORD environment variable is not set or is empty")
+    for col in df.columns:
+        col_lower = col.lower()
+        if any(date_term in col_lower for date_term in ['datum', 'date', 'zeit', 'time']):
+            date_columns.append(col)
             
-            # Build connection string for pyodbc
-            self.connection_string = (
-                f"DRIVER={{ODBC Driver 18 for SQL Server}};"
-                f"SERVER={DB_SERVER};"
-                f"DATABASE={DB_NAME};"
-                f"UID={DB_USER};"
-                f"PWD={DB_PASSWORD};"
-                f"Encrypt=yes;"
-                f"TrustServerCertificate=no;"
-                f"Connection Timeout=30;"
-            )
-            
-            # Build SQLAlchemy connection string
-            # Ensure password is a string before URL encoding
-            quoted_password = quote_plus(str(DB_PASSWORD))
-            sqlalchemy_url = (
-                f"mssql+pyodbc://{DB_USER}:{quoted_password}@{DB_SERVER}/{DB_NAME}"
-                f"?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=no"
-            )
-            
-            self.engine = create_engine(sqlalchemy_url, fast_executemany=True)
-            logger.info("✅ Database connection configured successfully")
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to setup database connection: {str(e)}")
-            raise
-    
-    def test_connection(self):
-        """Test the database connection"""
-        try:
-            with self.engine.connect() as conn:
-                result = conn.execute(text("SELECT 1 as test")).fetchone()
-                logger.info("✅ Database connection test successful")
-                return True
-        except Exception as e:
-            logger.error(f"❌ Database connection test failed: {str(e)}")
-            return False
-    
-    def get_latest_batch_id(self, table_name: str, batch_pattern: str) -> str:
-        """Get the most recent batch_id for a table"""
-        try:
-            query = text(f"""
-                SELECT TOP 1 batch_id 
-                FROM {table_name} 
-                WHERE batch_id LIKE :pattern 
-                ORDER BY upload_date DESC, batch_id DESC
-            """)
-            
-            with self.engine.connect() as conn:
-                result = conn.execute(query, {"pattern": batch_pattern}).fetchone()
-                if result:
-                    logger.info(f"Latest batch for {table_name}: {result[0]}")
-                    return result[0]
+            # Check data types in this column
+            sample_non_null = df[col].dropna()
+            if len(sample_non_null) > 0:
+                unique_types = set(type(val).__name__ for val in sample_non_null.head(10))
+                
+                # Check for problematic types
+                problematic_types = [t for t in unique_types if 'datetime' in t.lower() or 'timestamp' in t.lower()]
+                
+                if problematic_types:
+                    problematic_columns.append((col, problematic_types))
+                    logger.warning(f"⚠️  {df_name}.{col} contains datetime objects: {problematic_types}")
                 else:
-                    logger.warning(f"No batches found for {table_name} with pattern {batch_pattern}")
-                    return None
-                    
-        except Exception as e:
-            logger.error(f"Error getting latest batch for {table_name}: {str(e)}")
-            raise
+                    logger.info(f"✅ {df_name}.{col} properly handled as strings")
     
-    def read_table_as_dataframe(self, table_name: str, batch_id: str = None, column_mapping: dict = None) -> pd.DataFrame:
-        """
-        FIXED: Read table data as pandas DataFrame with date columns preserved as strings
-        """
-        try:
-            # Build the query
-            if batch_id:
-                query = f"SELECT * FROM {table_name} WHERE batch_id = '{batch_id}'"
-            else:
-                query = f"SELECT * FROM {table_name}"
-            
-            # FIXED: Force all columns to be read as strings initially to prevent auto-conversion
-            logger.info(f"🔄 Reading {table_name} with string preservation...")
-            df = pd.read_sql_query(query, self.engine, dtype=str)
-            
-            # FIXED: Now manually convert only non-date columns back to appropriate types
-            # This preserves date strings while allowing numeric conversions where needed
-            for column in df.columns:
-                if any(date_indicator in column.lower() for date_indicator in ['datum', 'date', 'buchungsdatum']):
-                    # Keep date columns as strings - do not convert
-                    logger.info(f"🗓️  Preserving date column as string: {column}")
-                    continue
-                else:
-                    # Try to convert non-date columns to appropriate types
-                    try:
-                        # Try numeric conversion for non-date columns
-                        if column.lower() in ['betrag_in_hauswaehrung', 'benoetiges_budget', 'amount', 'budget']:
-                            # Try to convert to float, but keep as string if it fails
-                            try:
-                                pd.to_numeric(df[column], errors='coerce')
-                                # If successful, keep as string anyway to avoid issues
-                                # The safe_float_conversion will handle it later
-                            except:
-                                pass
-                    except:
-                        # If any conversion fails, keep as string
-                        pass
-            
-            # CRITICAL: Create a completely independent copy to break any database references
-            df = df.copy(deep=True)
-            
-            # Apply column mapping if provided (to maintain compatibility with existing code)
-            if column_mapping:
-                df = df.rename(columns=column_mapping)
-            
-            # CRITICAL: Reset index and ensure clean DataFrame
-            df = df.reset_index(drop=True)
-            
-            logger.info(f"✅ Read {len(df)} records from {table_name} with preserved date strings")
-            return df
-            
-        except Exception as e:
-            logger.error(f"Error reading {table_name}: {str(e)}")
-            raise
-
+    if problematic_columns:
+        logger.error(f"❌ {df_name} has {len(problematic_columns)} columns with datetime objects!")
+        for col, types in problematic_columns:
+            logger.error(f"   - {col}: {types}")
+        return False
+    else:
+        logger.info(f"✅ {df_name} date handling verification passed ({len(date_columns)} date columns)")
+        return True
+    
 # Initialize database manager
 db_manager = DatabaseManager()
 
@@ -379,7 +501,9 @@ MSP_COLUMN_MAPPING = {
     'benoetiges_budget': 'Benötigtes Budget (Geschätzt)',
     'gruppen': 'Gruppen',
     'datum': 'Datum',
-    'name_field': 'Name'
+    'name_field': 'Name',
+    'anfangsdatum': 'Anfangsdatum',      # Start date field
+    'enddatum': 'Enddatum'               # End date field
 }
 
 FLOOR_MAPPING_COLUMNS = {
@@ -461,10 +585,10 @@ department_cache = Cache(CACHE_EXPIRY)
 
 def read_from_database(table_type: str) -> pd.DataFrame:
     """
-    Read data from database tables based on table type
+    Read data from database tables based on table type with DATE VERIFICATION
     This replaces the read_from_blob function
     """
-    logger.info(f"📊 Reading {table_type} data from database...")
+    logger.info(f"Reading {table_type} data from database...")
     
     if table_type == "sap":
         # Get latest SAP batch
@@ -479,6 +603,9 @@ def read_from_database(table_type: str) -> pd.DataFrame:
             SAP_COLUMN_MAPPING
         )
         
+        # 🔧 ADD THIS: Verify date handling
+        verify_date_handling_in_dataframe(df, "SAP")
+        
     elif table_type == "msp":
         # Get latest MSP batch  
         latest_batch = db_manager.get_latest_batch_id("msp_measures", "MSP_%")
@@ -491,6 +618,9 @@ def read_from_database(table_type: str) -> pd.DataFrame:
             latest_batch,
             MSP_COLUMN_MAPPING
         )
+        
+        # 🔧 ADD THIS: Verify date handling
+        verify_date_handling_in_dataframe(df, "MSP")
         
     elif table_type == "mapping_floor":
         # Get latest Floor mapping batch
@@ -528,7 +658,7 @@ def save_to_database_as_json(table_name: str, data: Any) -> None:
     Save processed data to a results table in the database
     This replaces saving JSON files to blob storage
     """
-    logger.info(f"💾 Saving processed data to database table: {table_name}")
+    logger.info(f"Saving processed data to database table: {table_name}")
     
     try:
         # STEP 1: Clean the data to remove circular references BEFORE JSON encoding
@@ -638,18 +768,21 @@ def main() -> None:
         mapping_floor = read_from_database("mapping_floor")
         mapping_hq = read_from_database("mapping_hq")
         
+        # 🔧 ADD THIS: Final verification that all critical data has proper date handling
+        logger.info("🔍 Final verification of date handling across all datasets...")
+        sap_ok = verify_date_handling_in_dataframe(sap_data, "SAP_FINAL")
+        msp_ok = verify_date_handling_in_dataframe(msp_data, "MSP_FINAL")
+        
+        if not sap_ok or not msp_ok:
+            raise ValueError("❌ Date handling verification failed! Check logs above.")
+        
+        logger.info("✅ All date handling verification passed!")
+        
         # Log column names for debugging
         logger.info(f"SAP data columns: {sap_data.columns.tolist()}")
         logger.info(f"MSP data columns: {msp_data.columns.tolist()}")
         logger.info(f"Mapping Floor columns: {mapping_floor.columns.tolist()}")
         logger.info(f"Mapping HQ columns: {mapping_hq.columns.tolist()}")
-        
-        # FIXED: Log sample data types to verify date preservation
-        logger.info("🔍 Data type verification:")
-        if 'Buchungsdatum' in sap_data.columns:
-            logger.info(f"SAP Buchungsdatum sample: {sap_data['Buchungsdatum'].iloc[0] if len(sap_data) > 0 else 'N/A'} (type: {type(sap_data['Buchungsdatum'].iloc[0]) if len(sap_data) > 0 else 'N/A'})")
-        if 'Datum' in msp_data.columns:
-            logger.info(f"MSP Datum sample: {msp_data['Datum'].iloc[0] if len(msp_data) > 0 else 'N/A'} (type: {type(msp_data['Datum'].iloc[0]) if len(msp_data) > 0 else 'N/A'})")
         
         # Retrieve previous processed data for comparison and tracking (FROM DATABASE)
         previous_data = read_previous_processed_data()
@@ -691,7 +824,6 @@ def main() -> None:
     except Exception as e:
         logger.error('❌ Error in data processing: %s', str(e), exc_info=True)
         raise
-
 # -----------------------------------------------------------------------------
 # MODIFIED FRONTEND VIEW GENERATION FOR DATABASE
 # -----------------------------------------------------------------------------
@@ -1303,24 +1435,9 @@ def process_sap_batch(
         estimated_amount = safe_float_conversion(safe_get(matching_measure, 'Benötigtes Budget (Geschätzt)', 0))
         actual_amount = safe_float_conversion(safe_get(transaction, 'Betrag in Hauswährung', 0))
         
-        # FIXED: Create dictionary with safe handling for all fields, ensuring strings remain strings
-        measure_data = {}
-        for k, v in matching_measure.to_dict().items():
-            if pd.isna(v):
-                measure_data[k] = None
-            elif isinstance(v, str):
-                measure_data[k] = v  # Keep strings as strings
-            else:
-                measure_data[k] = make_json_serializable(v)
-        
-        transaction_data = {}
-        for k, v in transaction.to_dict().items():
-            if pd.isna(v):
-                transaction_data[k] = None
-            elif isinstance(v, str):
-                transaction_data[k] = v  # Keep strings as strings
-            else:
-                transaction_data[k] = make_json_serializable(v)
+        # Create dictionary with safe handling for all fields
+        measure_data = {k: None if pd.isna(v) else v for k, v in matching_measure.to_dict().items()}
+        transaction_data = {k: None if pd.isna(v) else v for k, v in transaction.to_dict().items()}
         
         booked_measures.append({
             'transaction_id': str(safe_get(transaction, 'Belegnummer', '')),
@@ -1395,15 +1512,8 @@ def process_parked_measures(
             # Use safe conversion for estimated amount
             estimated_amount = safe_float_conversion(safe_get(measure, 'Benötigtes Budget (Geschätzt)', 0))
             
-            # FIXED: Create dictionary with safe handling for all fields, ensuring strings remain strings
-            measure_data = {}
-            for k, v in measure.to_dict().items():
-                if pd.isna(v):
-                    measure_data[k] = None
-                elif isinstance(v, str):
-                    measure_data[k] = v  # Keep strings as strings
-                else:
-                    measure_data[k] = make_json_serializable(v)
+            # Create dictionary with safe handling for all fields
+            measure_data = {k: None if pd.isna(v) else v for k, v in measure.to_dict().items()}
             
             # FIXED: Determine correct category and status based on assignment
             if manual_assignment:
@@ -1497,3 +1607,273 @@ def extract_bestellnummer_cached(text_field: str) -> Optional[int]:
     
     # Filter for numbers ≥3000
     valid_numbers = [int(num) for num in matches if int(num) >= 3000]
+    
+    result = valid_numbers[0] if valid_numbers else None
+    
+    # Cache the result
+    bestellnummer_cache.set(text_field, result)
+    return result
+
+def map_kostenstelle_cached(kostenstelle: str, mapping_index: Dict[str, LocationInfo]) -> Optional[Tuple[LocationInfo, str]]:
+    """
+    Map Kostenstelle to location information with caching
+    Returns a tuple of (LocationInfo, location_type) where location_type is 'Floor' or 'HQ'
+    """
+    # Check cache first
+    cached_result = kostenstelle_cache.get(kostenstelle)
+    if cached_result is not None:
+        return cached_result
+    
+    # Cache miss - compute result
+    # Ensure kostenstelle is a string without decimal part
+    if not kostenstelle:
+        return None
+    
+    # Strip any decimal portion and whitespace
+    kostenstelle = str(kostenstelle).strip()
+    if '.' in kostenstelle:
+        kostenstelle = kostenstelle.split('.')[0]
+    
+    # Ensure we have at least 5 digits
+    if len(kostenstelle) < 5:
+        return None
+    
+    location_type = None  # Will be set to 'Floor' or 'HQ'
+    
+    if kostenstelle.startswith('1'):
+        # HQ Kostenstelle - use full 8-digit number
+        result = mapping_index.get(kostenstelle)
+        location_type = 'HQ'
+    
+    elif kostenstelle.startswith('3'):
+        # Floor Kostenstelle - extract digits 2-6 (to get the 5 digits after the leading '3')
+        # For example: 35020400 → 50204
+        extracted_digits = kostenstelle[1:6]
+        
+        # First try direct lookup
+        result = mapping_index.get(extracted_digits)
+        
+        # If not found, try with FLOOR_ prefix (depending on how you created your index)
+        if result is None:
+            result = mapping_index.get(f"FLOOR_{extracted_digits}")
+            
+        # If still not found, try some error correction (like removing leading zeros)
+        if result is None:
+            # Try without leading zeros
+            stripped_digits = extracted_digits.lstrip('0')
+            result = mapping_index.get(stripped_digits)
+            if result is None:
+                result = mapping_index.get(f"FLOOR_{stripped_digits}")
+        
+        if result is not None:
+            location_type = 'Floor'
+    
+    else:
+        result = None
+    
+    # Prepare the result (both location info and type)
+    final_result = (result, location_type) if result is not None else None
+    
+    # Cache the result
+    kostenstelle_cache.set(kostenstelle, final_result)
+    return final_result
+
+def extract_department_from_gruppen_cached(gruppen_field: str) -> Optional[str]:
+    """
+    Extract department information from Gruppen field with caching
+    """
+    if pd.isna(gruppen_field) or not gruppen_field:
+        return ''  # Return empty string instead of None
+        
+    gruppen_field = str(gruppen_field)
+    
+    # Check cache first
+    cached_result = department_cache.get(gruppen_field)
+    if cached_result is not None:
+        return cached_result
+    
+    # Cache miss - compute result
+    # Department mapping
+    department_mapping = {
+        'BW': 'Abteilung Baden-Württemberg (BW)',
+        'SH/Ni/HH/HB': 'Abteilung Schleswig-Holstein, Niedersachsen, Hamburg, Bremen (SH/Ni/HH/HB)',
+        'MV/BB/BE': 'Abteilung Mecklenburg-Vorpommern, Brandenburg, Berlin (MV/BB/BE)',
+        'NRW Nord': 'Abteilung Nordrhein-Westfalen Nord (NRW Nord)',
+        'NRW Süd': 'Abteilung Nordrhein-Westfalen Süd (NRW Süd)',
+        'ST/TH/SN': 'Abteilung Sachsen-Anhalt, Thüringen, Sachsen (ST/TH/SN)',
+        'HE/RP/SL': 'Abteilung Hessen, Rheinland-Pfalz, Saarland (HE/RP/SL)',
+        'BY': 'Abteilung Bayern (BY)'
+    }
+    
+    # Split the Gruppen field by commas or similar delimiters
+    gruppen_entries = [entry.strip() for entry in gruppen_field.split(',')]
+    
+    # Count department occurrences
+    department_counts = {}
+    
+    for entry in gruppen_entries:
+        # Clean up the entry and look for department codes
+        entry = entry.replace('Kundenbetreuungsregion', '').replace('Vertriebsregion', '').strip()
+        
+        for code in department_mapping.keys():
+            if f"Abteilung {code}" in entry:
+                if code in department_counts:
+                    department_counts[code] += 1
+                else:
+                    department_counts[code] = 1
+                break
+    
+    if not department_counts:
+        result = ''  # Return empty string instead of None
+    # If only one department found
+    elif len(department_counts) == 1:
+        dept_code = list(department_counts.keys())[0]
+        result = department_mapping[dept_code]
+    else:
+        # If multiple departments found, return the one with highest count
+        max_count = 0
+        most_frequent_dept = None
+        
+        for dept, count in department_counts.items():
+            if count > max_count:
+                max_count = count
+                most_frequent_dept = dept
+        
+        result = department_mapping.get(most_frequent_dept, '')  # Empty string as fallback
+    
+    # Cache the result
+    department_cache.set(gruppen_field, result)
+    return result
+
+# -----------------------------------------------------------------------------
+# API FUNCTIONS FOR EXTERNAL ACCESS
+# -----------------------------------------------------------------------------
+
+def get_processed_data_from_database(result_type: str = "transactions") -> Dict:
+    """
+    API function to retrieve processed data from database
+    """
+    try:
+        query = text("""
+            SELECT data 
+            FROM processing_results 
+            WHERE result_type = :result_type
+            ORDER BY created_at DESC
+        """)
+        
+        with db_manager.engine.connect() as conn:
+            result = conn.execute(query, {"result_type": result_type}).fetchone()
+            
+            if result:
+                data = json.loads(result[0])
+                logger.info(f"Retrieved {result_type} data from database")
+                return data
+            else:
+                logger.warning(f"No {result_type} data found in database")
+                return {}
+                
+    except Exception as e:
+        logger.error(f"Error retrieving {result_type} data: {str(e)}")
+        raise
+
+def get_all_available_results() -> List[str]:
+    """
+    Get list of all available result types in the database
+    """
+    try:
+        query = text("""
+            SELECT DISTINCT result_type, MAX(created_at) as latest
+            FROM processing_results 
+            GROUP BY result_type
+            ORDER BY latest DESC
+        """)
+        
+        with db_manager.engine.connect() as conn:
+            results = conn.execute(query).fetchall()
+            return [row[0] for row in results]
+            
+    except Exception as e:
+        logger.error(f"Error getting available results: {str(e)}")
+        return []
+
+def test_date_handling():
+    """Test that date handling works correctly"""
+    logger.info("🧪 Testing date handling fix...")
+    
+    try:
+        # Read MSP data (the problematic one)
+        msp_data = read_from_database("msp")
+        
+        # Check specific date columns
+        for col in ['Datum', 'datum']:  # Check both mapped and original names
+            if col in msp_data.columns:
+                sample_dates = msp_data[col].dropna().head(3).tolist()
+                logger.info(f"📅 {col} samples: {sample_dates}")
+                logger.info(f"📅 {col} types: {[type(d).__name__ for d in sample_dates]}")
+                
+                # Verify they're strings, not datetime objects
+                for date_val in sample_dates:
+                    if 'datetime' in str(type(date_val)):
+                        logger.error(f"❌ Found datetime object in {col}: {date_val} ({type(date_val)})")
+                        return False
+                    else:
+                        logger.info(f"✅ Proper string date: {date_val} ({type(date_val)})")
+        
+        # Test JSON serialization
+        logger.info("🧪 Testing JSON serialization...")
+        test_record = msp_data.iloc[0].to_dict()
+        json_str = json.dumps(test_record, cls=JSONEncoder)
+        logger.info(f"✅ JSON serialization successful: {len(json_str)} characters")
+        
+        # Check for problematic datetime strings in JSON
+        if 'datetime.date(' in json_str:
+            logger.error(f"❌ Found datetime.date() in JSON: {json_str[:200]}...")
+            return False
+        
+        logger.info("✅ Date handling test passed!")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Date handling test failed: {str(e)}")
+        return False
+# -----------------------------------------------------------------------------
+# MAIN EXECUTION
+# -----------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    try:
+        # Check if database password is set
+        if not DB_PASSWORD:
+            print("❌ ERROR: DB_PASSWORD environment variable not set!")
+            print("\nPlease set the database password using one of these methods:")
+            print("1. Command Prompt: set DB_PASSWORD=your_password")
+            print("2. PowerShell: $env:DB_PASSWORD=\"your_password\"")
+            print("3. Add to Windows Environment Variables permanently")
+            print("\nAlternatively, you can set it in the script temporarily for testing:")
+            print("Add this line after the imports: os.environ['DB_PASSWORD'] = 'your_password'")
+            exit(1)
+        
+        logger.info(f"🔐 Using database password: {'*' * len(str(DB_PASSWORD))}")
+        
+        # Test database connection first
+        logger.info("🔌 Testing database connection...")
+        if not db_manager.test_connection():
+            logger.error("❌ Database connection test failed!")
+            exit(1)
+        
+        # 🔧 ADD THIS: Test date handling BEFORE running main processing
+        logger.info("🧪 Running date handling test...")
+        if not test_date_handling():
+            logger.error("❌ Date handling test failed! Fix date issues before processing.")
+            exit(1)
+        
+        # Run the main processing function
+        main()
+        
+        # Optional: Print summary of available results
+        available_results = get_all_available_results()
+        logger.info(f"✅ Available results in database: {available_results}")
+        
+    except Exception as e:
+        logger.error(f"💥 Fatal error in main execution: {str(e)}", exc_info=True)
+        exit(1)

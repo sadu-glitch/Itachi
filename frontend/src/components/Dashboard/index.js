@@ -43,7 +43,7 @@ const Dashboard = ({ stats, budgetData, awaitingAssignment, apiUrl }) => {
           ? baseApiUrl.slice(0, -1) 
           : baseApiUrl;
           
-        const response = await fetch(`${normalizedApiUrl}/api/transactions`);
+        const response = await fetch(`${normalizedApiUrl}/api/transactions-simple`);
         
         if (!response.ok) {
           throw new Error('Failed to fetch all transactions');

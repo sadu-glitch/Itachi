@@ -3,7 +3,7 @@ import numpy as np
 import re
 import json
 import os
-from datetime import datetime, date
+from datetime import datetime
 import logging
 import concurrent.futures
 import functools
@@ -82,11 +82,11 @@ def safe_get(row, column, default=None):
         return default
     return row[column]
 
-# FIXED: Enhanced make_json_serializable function to handle date objects
+# Enhanced make_json_serializable function to better handle NaN values and circular references
 def make_json_serializable(obj, _seen=None):
     """
     Convert objects that are not JSON serializable to serializable formats
-    Added circular reference detection and proper date object handling
+    Added circular reference detection
     """
     if _seen is None:
         _seen = set()
@@ -100,10 +100,7 @@ def make_json_serializable(obj, _seen=None):
         _seen.add(obj_id)
     
     try:
-        # FIXED: Handle datetime.date objects (the main culprit)
-        if isinstance(obj, date):
-            return obj.strftime('%Y-%m-%d')
-        elif isinstance(obj, pd.Timestamp):
+        if isinstance(obj, pd.Timestamp):
             return obj.strftime('%Y-%m-%d %H:%M:%S')
         elif isinstance(obj, pd.Series):
             # Convert Series to simple dict, avoiding circular references
@@ -186,10 +183,6 @@ class JSONEncoder(json.JSONEncoder):
     Custom JSON encoder that handles pandas and numpy types with circular reference protection
     """
     def default(self, obj):
-        # FIXED: Handle datetime.date objects first
-        if isinstance(obj, date):
-            return obj.strftime('%Y-%m-%d')
-        
         # Handle NaN, infinity, and -infinity
         if isinstance(obj, float):
             if np.isnan(obj):
@@ -304,7 +297,7 @@ class DatabaseManager:
     
     def read_table_as_dataframe(self, table_name: str, batch_id: str = None, column_mapping: dict = None) -> pd.DataFrame:
         """
-        FIXED: Read table data as pandas DataFrame with date columns preserved as strings
+        Read table data as pandas DataFrame with optional batch filtering and column mapping
         """
         try:
             # Build the query
@@ -313,32 +306,8 @@ class DatabaseManager:
             else:
                 query = f"SELECT * FROM {table_name}"
             
-            # FIXED: Force all columns to be read as strings initially to prevent auto-conversion
-            logger.info(f"🔄 Reading {table_name} with string preservation...")
-            df = pd.read_sql_query(query, self.engine, dtype=str)
-            
-            # FIXED: Now manually convert only non-date columns back to appropriate types
-            # This preserves date strings while allowing numeric conversions where needed
-            for column in df.columns:
-                if any(date_indicator in column.lower() for date_indicator in ['datum', 'date', 'buchungsdatum']):
-                    # Keep date columns as strings - do not convert
-                    logger.info(f"🗓️  Preserving date column as string: {column}")
-                    continue
-                else:
-                    # Try to convert non-date columns to appropriate types
-                    try:
-                        # Try numeric conversion for non-date columns
-                        if column.lower() in ['betrag_in_hauswaehrung', 'benoetiges_budget', 'amount', 'budget']:
-                            # Try to convert to float, but keep as string if it fails
-                            try:
-                                pd.to_numeric(df[column], errors='coerce')
-                                # If successful, keep as string anyway to avoid issues
-                                # The safe_float_conversion will handle it later
-                            except:
-                                pass
-                    except:
-                        # If any conversion fails, keep as string
-                        pass
+            # Read data using pandas
+            df = pd.read_sql_query(query, self.engine)
             
             # CRITICAL: Create a completely independent copy to break any database references
             df = df.copy(deep=True)
@@ -350,7 +319,7 @@ class DatabaseManager:
             # CRITICAL: Reset index and ensure clean DataFrame
             df = df.reset_index(drop=True)
             
-            logger.info(f"✅ Read {len(df)} records from {table_name} with preserved date strings")
+            logger.info(f"Read {len(df)} records from {table_name}")
             return df
             
         except Exception as e:
@@ -464,7 +433,7 @@ def read_from_database(table_type: str) -> pd.DataFrame:
     Read data from database tables based on table type
     This replaces the read_from_blob function
     """
-    logger.info(f"📊 Reading {table_type} data from database...")
+    logger.info(f"Reading {table_type} data from database...")
     
     if table_type == "sap":
         # Get latest SAP batch
@@ -528,7 +497,7 @@ def save_to_database_as_json(table_name: str, data: Any) -> None:
     Save processed data to a results table in the database
     This replaces saving JSON files to blob storage
     """
-    logger.info(f"💾 Saving processed data to database table: {table_name}")
+    logger.info(f"Saving processed data to database table: {table_name}")
     
     try:
         # STEP 1: Clean the data to remove circular references BEFORE JSON encoding
@@ -643,13 +612,6 @@ def main() -> None:
         logger.info(f"MSP data columns: {msp_data.columns.tolist()}")
         logger.info(f"Mapping Floor columns: {mapping_floor.columns.tolist()}")
         logger.info(f"Mapping HQ columns: {mapping_hq.columns.tolist()}")
-        
-        # FIXED: Log sample data types to verify date preservation
-        logger.info("🔍 Data type verification:")
-        if 'Buchungsdatum' in sap_data.columns:
-            logger.info(f"SAP Buchungsdatum sample: {sap_data['Buchungsdatum'].iloc[0] if len(sap_data) > 0 else 'N/A'} (type: {type(sap_data['Buchungsdatum'].iloc[0]) if len(sap_data) > 0 else 'N/A'})")
-        if 'Datum' in msp_data.columns:
-            logger.info(f"MSP Datum sample: {msp_data['Datum'].iloc[0] if len(msp_data) > 0 else 'N/A'} (type: {type(msp_data['Datum'].iloc[0]) if len(msp_data) > 0 else 'N/A'})")
         
         # Retrieve previous processed data for comparison and tracking (FROM DATABASE)
         previous_data = read_previous_processed_data()
@@ -1303,24 +1265,9 @@ def process_sap_batch(
         estimated_amount = safe_float_conversion(safe_get(matching_measure, 'Benötigtes Budget (Geschätzt)', 0))
         actual_amount = safe_float_conversion(safe_get(transaction, 'Betrag in Hauswährung', 0))
         
-        # FIXED: Create dictionary with safe handling for all fields, ensuring strings remain strings
-        measure_data = {}
-        for k, v in matching_measure.to_dict().items():
-            if pd.isna(v):
-                measure_data[k] = None
-            elif isinstance(v, str):
-                measure_data[k] = v  # Keep strings as strings
-            else:
-                measure_data[k] = make_json_serializable(v)
-        
-        transaction_data = {}
-        for k, v in transaction.to_dict().items():
-            if pd.isna(v):
-                transaction_data[k] = None
-            elif isinstance(v, str):
-                transaction_data[k] = v  # Keep strings as strings
-            else:
-                transaction_data[k] = make_json_serializable(v)
+        # Create dictionary with safe handling for all fields
+        measure_data = {k: None if pd.isna(v) else v for k, v in matching_measure.to_dict().items()}
+        transaction_data = {k: None if pd.isna(v) else v for k, v in transaction.to_dict().items()}
         
         booked_measures.append({
             'transaction_id': str(safe_get(transaction, 'Belegnummer', '')),
@@ -1395,15 +1342,8 @@ def process_parked_measures(
             # Use safe conversion for estimated amount
             estimated_amount = safe_float_conversion(safe_get(measure, 'Benötigtes Budget (Geschätzt)', 0))
             
-            # FIXED: Create dictionary with safe handling for all fields, ensuring strings remain strings
-            measure_data = {}
-            for k, v in measure.to_dict().items():
-                if pd.isna(v):
-                    measure_data[k] = None
-                elif isinstance(v, str):
-                    measure_data[k] = v  # Keep strings as strings
-                else:
-                    measure_data[k] = make_json_serializable(v)
+            # Create dictionary with safe handling for all fields
+            measure_data = {k: None if pd.isna(v) else v for k, v in measure.to_dict().items()}
             
             # FIXED: Determine correct category and status based on assignment
             if manual_assignment:
@@ -1497,3 +1437,227 @@ def extract_bestellnummer_cached(text_field: str) -> Optional[int]:
     
     # Filter for numbers ≥3000
     valid_numbers = [int(num) for num in matches if int(num) >= 3000]
+    
+    result = valid_numbers[0] if valid_numbers else None
+    
+    # Cache the result
+    bestellnummer_cache.set(text_field, result)
+    return result
+
+def map_kostenstelle_cached(kostenstelle: str, mapping_index: Dict[str, LocationInfo]) -> Optional[Tuple[LocationInfo, str]]:
+    """
+    Map Kostenstelle to location information with caching
+    Returns a tuple of (LocationInfo, location_type) where location_type is 'Floor' or 'HQ'
+    """
+    # Check cache first
+    cached_result = kostenstelle_cache.get(kostenstelle)
+    if cached_result is not None:
+        return cached_result
+    
+    # Cache miss - compute result
+    # Ensure kostenstelle is a string without decimal part
+    if not kostenstelle:
+        return None
+    
+    # Strip any decimal portion and whitespace
+    kostenstelle = str(kostenstelle).strip()
+    if '.' in kostenstelle:
+        kostenstelle = kostenstelle.split('.')[0]
+    
+    # Ensure we have at least 5 digits
+    if len(kostenstelle) < 5:
+        return None
+    
+    location_type = None  # Will be set to 'Floor' or 'HQ'
+    
+    if kostenstelle.startswith('1'):
+        # HQ Kostenstelle - use full 8-digit number
+        result = mapping_index.get(kostenstelle)
+        location_type = 'HQ'
+    
+    elif kostenstelle.startswith('3'):
+        # Floor Kostenstelle - extract digits 2-6 (to get the 5 digits after the leading '3')
+        # For example: 35020400 → 50204
+        extracted_digits = kostenstelle[1:6]
+        
+        # First try direct lookup
+        result = mapping_index.get(extracted_digits)
+        
+        # If not found, try with FLOOR_ prefix (depending on how you created your index)
+        if result is None:
+            result = mapping_index.get(f"FLOOR_{extracted_digits}")
+            
+        # If still not found, try some error correction (like removing leading zeros)
+        if result is None:
+            # Try without leading zeros
+            stripped_digits = extracted_digits.lstrip('0')
+            result = mapping_index.get(stripped_digits)
+            if result is None:
+                result = mapping_index.get(f"FLOOR_{stripped_digits}")
+        
+        if result is not None:
+            location_type = 'Floor'
+    
+    else:
+        result = None
+    
+    # Prepare the result (both location info and type)
+    final_result = (result, location_type) if result is not None else None
+    
+    # Cache the result
+    kostenstelle_cache.set(kostenstelle, final_result)
+    return final_result
+
+def extract_department_from_gruppen_cached(gruppen_field: str) -> Optional[str]:
+    """
+    Extract department information from Gruppen field with caching
+    """
+    if pd.isna(gruppen_field) or not gruppen_field:
+        return ''  # Return empty string instead of None
+        
+    gruppen_field = str(gruppen_field)
+    
+    # Check cache first
+    cached_result = department_cache.get(gruppen_field)
+    if cached_result is not None:
+        return cached_result
+    
+    # Cache miss - compute result
+    # Department mapping
+    department_mapping = {
+        'BW': 'Abteilung Baden-Württemberg (BW)',
+        'SH/Ni/HH/HB': 'Abteilung Schleswig-Holstein, Niedersachsen, Hamburg, Bremen (SH/Ni/HH/HB)',
+        'MV/BB/BE': 'Abteilung Mecklenburg-Vorpommern, Brandenburg, Berlin (MV/BB/BE)',
+        'NRW Nord': 'Abteilung Nordrhein-Westfalen Nord (NRW Nord)',
+        'NRW Süd': 'Abteilung Nordrhein-Westfalen Süd (NRW Süd)',
+        'ST/TH/SN': 'Abteilung Sachsen-Anhalt, Thüringen, Sachsen (ST/TH/SN)',
+        'HE/RP/SL': 'Abteilung Hessen, Rheinland-Pfalz, Saarland (HE/RP/SL)',
+        'BY': 'Abteilung Bayern (BY)'
+    }
+    
+    # Split the Gruppen field by commas or similar delimiters
+    gruppen_entries = [entry.strip() for entry in gruppen_field.split(',')]
+    
+    # Count department occurrences
+    department_counts = {}
+    
+    for entry in gruppen_entries:
+        # Clean up the entry and look for department codes
+        entry = entry.replace('Kundenbetreuungsregion', '').replace('Vertriebsregion', '').strip()
+        
+        for code in department_mapping.keys():
+            if f"Abteilung {code}" in entry:
+                if code in department_counts:
+                    department_counts[code] += 1
+                else:
+                    department_counts[code] = 1
+                break
+    
+    if not department_counts:
+        result = ''  # Return empty string instead of None
+    # If only one department found
+    elif len(department_counts) == 1:
+        dept_code = list(department_counts.keys())[0]
+        result = department_mapping[dept_code]
+    else:
+        # If multiple departments found, return the one with highest count
+        max_count = 0
+        most_frequent_dept = None
+        
+        for dept, count in department_counts.items():
+            if count > max_count:
+                max_count = count
+                most_frequent_dept = dept
+        
+        result = department_mapping.get(most_frequent_dept, '')  # Empty string as fallback
+    
+    # Cache the result
+    department_cache.set(gruppen_field, result)
+    return result
+
+# -----------------------------------------------------------------------------
+# API FUNCTIONS FOR EXTERNAL ACCESS
+# -----------------------------------------------------------------------------
+
+def get_processed_data_from_database(result_type: str = "transactions") -> Dict:
+    """
+    API function to retrieve processed data from database
+    """
+    try:
+        query = text("""
+            SELECT data 
+            FROM processing_results 
+            WHERE result_type = :result_type
+            ORDER BY created_at DESC
+        """)
+        
+        with db_manager.engine.connect() as conn:
+            result = conn.execute(query, {"result_type": result_type}).fetchone()
+            
+            if result:
+                data = json.loads(result[0])
+                logger.info(f"Retrieved {result_type} data from database")
+                return data
+            else:
+                logger.warning(f"No {result_type} data found in database")
+                return {}
+                
+    except Exception as e:
+        logger.error(f"Error retrieving {result_type} data: {str(e)}")
+        raise
+
+def get_all_available_results() -> List[str]:
+    """
+    Get list of all available result types in the database
+    """
+    try:
+        query = text("""
+            SELECT DISTINCT result_type, MAX(created_at) as latest
+            FROM processing_results 
+            GROUP BY result_type
+            ORDER BY latest DESC
+        """)
+        
+        with db_manager.engine.connect() as conn:
+            results = conn.execute(query).fetchall()
+            return [row[0] for row in results]
+            
+    except Exception as e:
+        logger.error(f"Error getting available results: {str(e)}")
+        return []
+
+# -----------------------------------------------------------------------------
+# MAIN EXECUTION
+# -----------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    try:
+        # Check if database password is set
+        if not DB_PASSWORD:
+            print("❌ ERROR: DB_PASSWORD environment variable not set!")
+            print("\nPlease set the database password using one of these methods:")
+            print("1. Command Prompt: set DB_PASSWORD=your_password")
+            print("2. PowerShell: $env:DB_PASSWORD=\"your_password\"")
+            print("3. Add to Windows Environment Variables permanently")
+            print("\nAlternatively, you can set it in the script temporarily for testing:")
+            print("Add this line after the imports: os.environ['DB_PASSWORD'] = 'your_password'")
+            exit(1)
+        
+        logger.info(f"🔐 Using database password: {'*' * len(str(DB_PASSWORD))}")
+        
+        # Test database connection first
+        logger.info("🔌 Testing database connection...")
+        if not db_manager.test_connection():
+            logger.error("❌ Database connection test failed!")
+            exit(1)
+        
+        # Run the main processing function
+        main()
+        
+        # Optional: Print summary of available results
+        available_results = get_all_available_results()
+        logger.info(f"✅ Available results in database: {available_results}")
+        
+    except Exception as e:
+        logger.error(f"💥 Fatal error in main execution: {str(e)}", exc_info=True)
+        exit(1)
