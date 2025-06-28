@@ -1,6 +1,4 @@
 import React, { useState } from 'react';
-// Remove the useAssignment hook import since we'll handle it directly
-// import { useAssignment } from '../../hooks/useAssignment';
 
 /**
  * Enhanced component to display measures awaiting assignment with clickable rows
@@ -28,34 +26,84 @@ const ParkedMeasuresSection = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // ✅ FIXED: Direct API call function for database
+  // ✅ ENHANCED DEBUG VERSION - Only this function, removed the duplicate
   const assignMeasure = async (assignmentData) => {
     try {
       setLoading(true);
       setError('');
       
-      console.log('Sending assignment data:', assignmentData); // Debug log
+      // ✅ ENHANCED DEBUG: Log exactly what we're sending
+      console.log('🔍 ASSIGNMENT DEBUG:');
+      console.log('- Assignment Data:', assignmentData);
+      console.log('- Bestellnummer type:', typeof assignmentData.bestellnummer);
+      console.log('- Bestellnummer value:', assignmentData.bestellnummer);
+      console.log('- Region:', assignmentData.region);
+      console.log('- District:', assignmentData.district);
+      console.log('- Base API URL:', baseApiUrl);
       
-      const response = await fetch(`${baseApiUrl}/api/assign-measure`, {
+      const requestBody = {
+        bestellnummer: parseInt(assignmentData.bestellnummer, 10),
+        region: assignmentData.region.trim(),
+        district: assignmentData.district.trim()
+      };
+      
+      console.log('- Final Request Body:', requestBody);
+      console.log('- Request Body JSON:', JSON.stringify(requestBody));
+      
+      const apiEndpoint = `${baseApiUrl}/api/assign-measure`;
+      console.log('- API Endpoint:', apiEndpoint);
+      
+      const response = await fetch(apiEndpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-User-Name': 'Frontend User',
-          'X-Change-Reason': 'Manual measure assignment'
+          'Accept': 'application/json'
         },
-        body: JSON.stringify(assignmentData)
+        mode: 'cors',
+        body: JSON.stringify(requestBody)
       });
 
-      const result = await response.json();
+      console.log('- Response Status:', response.status);
+      console.log('- Response OK:', response.ok);
+      
+      // ✅ FIX: Handle empty response body properly
+      const responseText = await response.text();
+      console.log('- Raw Response Text:', responseText);
+      console.log('- Response Text Length:', responseText.length);
       
       if (!response.ok) {
-        throw new Error(result.message || `HTTP error! status: ${response.status}`);
+        console.error('❌ Response not OK');
+        if (responseText) {
+          try {
+            const errorData = JSON.parse(responseText);
+            throw new Error(errorData.message || `Server error: ${response.status}`);
+          } catch (parseError) {
+            console.error('❌ Failed to parse error response:', parseError);
+            throw new Error(`Server error ${response.status}: ${responseText}`);
+          }
+        } else {
+          throw new Error(`Server error ${response.status}: Empty response from server`);
+        }
       }
 
-      console.log('Assignment successful:', result);
+      // ✅ FIX: Parse JSON only if response has content
+      if (!responseText) {
+        throw new Error('Empty response from server');
+      }
+      
+      let result;
+      try {
+        result = JSON.parse(responseText);
+        console.log('✅ Assignment successful:', result);
+      } catch (parseError) {
+        console.error('❌ Failed to parse success response:', parseError);
+        throw new Error(`Invalid JSON response: ${responseText}`);
+      }
+      
       return result;
+
     } catch (error) {
-      console.error('Assignment error:', error);
+      console.error('❌ Assignment error:', error);
       throw error;
     } finally {
       setLoading(false);
@@ -389,8 +437,7 @@ const ParkedMeasuresSection = ({
             }}>
               <h4 style={{ margin: '0 0 15px 0', color: '#155724' }}>Assignment</h4>
               
-              {/* ✅ FIXED: Form submission */}
-              <form onSubmit={handleAssignSubmit}>
+              <div>
                 <div style={{ marginBottom: '15px' }}>
                   <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
                     Region
@@ -492,7 +539,8 @@ const ParkedMeasuresSection = ({
                     Cancel
                   </button>
                   <button 
-                    type="submit" 
+                    type="button"
+                    onClick={handleAssignSubmit}
                     disabled={loading}
                     style={{
                       backgroundColor: '#007bff',
@@ -507,7 +555,7 @@ const ParkedMeasuresSection = ({
                     {loading ? 'Assigning...' : 'Assign'}
                   </button>
                 </div>
-              </form>
+              </div>
             </div>
           </div>
         </div>
