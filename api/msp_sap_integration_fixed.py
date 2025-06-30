@@ -97,8 +97,6 @@ def safe_get(row, column, default=None):
         return default
     return row[column]
 
-
-
 class DatabaseManager:
     """
     Manages database connections and operations with FIXED date handling

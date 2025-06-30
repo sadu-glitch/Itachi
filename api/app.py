@@ -8,9 +8,9 @@ import pandas as pd
 import tempfile
 from datetime import datetime
 import logging
-from urllib.parse import unquote
+from urllib.parse import unquote, quote_plus
 import ast
-from sqlalchemy import text
+from sqlalchemy import text, create_engine
 import time
 from msp_sap_integration_fixed import make_json_serializable
 
@@ -1353,6 +1353,323 @@ def upload_file():
             "data_source": "Azure SQL Database tables"
         }
     }), 200
+@app.route('/api/transactions-normalized', methods=['GET'])
+def get_transactions_normalized():
+    """
+    NEW: Get transactions from normalized table (reuses existing DB connection)
+    """
+    try:
+        logger.info("🚀 NEW ENDPOINT: /api/transactions-normalized")
+        
+        # Get query parameters for filtering
+        department = request.args.get('department')
+        region = request.args.get('region')
+        category = request.args.get('category')
+        status = request.args.get('status')
+        limit = request.args.get('limit', 100, type=int)
+        
+        logger.info(f"🔍 Filters: dept={department}, region={region}, category={category}, status={status}, limit={limit}")
+        
+        # Use your existing database manager instead of creating new connection
+        db_mgr = get_db_manager()
+        
+        # Build dynamic SQL query
+        where_conditions = []
+        params = {}
+        
+        if department:
+            where_conditions.append("department = :department")
+            params['department'] = department
+            
+        if region:
+            where_conditions.append("region = :region")
+            params['region'] = region
+            
+        if category:
+            where_conditions.append("category = :category")
+            params['category'] = category
+            
+        if status:
+            where_conditions.append("status = :status")
+            params['status'] = status
+        
+        # Build the complete query
+        base_query = """
+            SELECT 
+                transaction_id,
+                category,
+                status,
+                budget_impact,
+                amount,
+                estimated_amount,
+                actual_amount,
+                variance,
+                department,
+                region,
+                district,
+                location_type,
+                booking_date,
+                measure_date,
+                bestellnummer,
+                measure_id,
+                measure_title,
+                kostenstelle,
+                batch_id,
+                processing_date,
+                additional_data
+            FROM transactions_normalized
+        """
+        
+        if where_conditions:
+            base_query += " WHERE " + " AND ".join(where_conditions)
+        
+        base_query += f" ORDER BY booking_date DESC OFFSET 0 ROWS FETCH NEXT {limit} ROWS ONLY"
+        
+        # Execute query using existing database manager
+        with db_mgr.engine.connect() as conn:
+            start_time = time.time()
+            result = conn.execute(text(base_query), params)
+            query_time = time.time() - start_time
+            
+            # Convert to list of dictionaries
+            transactions = []
+            for row in result:
+                transaction = {
+                    'transaction_id': row[0],
+                    'category': row[1],
+                    'status': row[2],
+                    'budget_impact': row[3],
+                    'amount': float(row[4]) if row[4] else 0,
+                    'estimated_amount': float(row[5]) if row[5] else 0,
+                    'actual_amount': float(row[6]) if row[6] else 0,
+                    'variance': float(row[7]) if row[7] else 0,
+                    'department': row[8] or '',
+                    'region': row[9] or '',
+                    'district': row[10] or '',
+                    'location_type': row[11] or '',
+                    'booking_date': str(row[12]) if row[12] else '',
+                    'measure_date': str(row[13]) if row[13] else '',
+                    'bestellnummer': row[14],
+                    'measure_id': row[15] or '',
+                    'measure_title': row[16] or '',
+                    'kostenstelle': row[17] or '',
+                    'batch_id': row[18] or '',
+                    'processing_date': str(row[19]) if row[19] else '',
+                    'text': '',  # Will be in additional_data JSON
+                    'name': ''   # Will be in additional_data JSON
+                }
+                
+                # Parse additional_data JSON if exists
+                if row[20]:  # additional_data
+                    try:
+                        additional = json.loads(row[20])
+                        transaction['text'] = additional.get('text', '')
+                        transaction['name'] = additional.get('name', '')
+                        transaction['previously_parked'] = additional.get('previously_parked', False)
+                    except:
+                        pass
+                
+                transactions.append(transaction)
+            
+            # Get summary statistics with separate queries
+            stats_query = """
+                SELECT 
+                    category,
+                    COUNT(*) as count,
+                    SUM(CASE WHEN amount IS NOT NULL THEN amount ELSE 0 END) as total_amount
+                FROM transactions_normalized
+                GROUP BY category
+            """
+            
+            stats_result = conn.execute(text(stats_query))
+            category_stats = {}
+            total_amount = 0
+            
+            for stat_row in stats_result:
+                cat, count, amount = stat_row
+                category_stats[cat] = {
+                    'count': count,
+                    'total_amount': float(amount) if amount else 0
+                }
+                total_amount += float(amount) if amount else 0
+            
+            # Get total count (with filters applied)
+            count_query = "SELECT COUNT(*) FROM transactions_normalized"
+            if where_conditions:
+                count_query += " WHERE " + " AND ".join(where_conditions)
+            
+            total_count = conn.execute(text(count_query), params).scalar()
+        
+        # Build response (same format as original API)
+        response_data = {
+            "transactions": transactions,
+            "summary": {
+                "total_transactions": total_count,
+                "returned_transactions": len(transactions),
+                "query_time_seconds": round(query_time, 4),
+                "by_category": category_stats,
+                "total_amount": total_amount,
+                "data_source": "transactions_normalized (HIGH PERFORMANCE)",
+                "performance_note": f"Query executed in {query_time:.4f} seconds"
+            },
+            "filters_applied": {
+                "department": department,
+                "region": region,
+                "category": category,
+                "status": status,
+                "limit": limit
+            },
+            "pagination": {
+                "limit": limit,
+                "has_more": total_count > limit,
+                "total_available": total_count
+            }
+        }
+        
+        logger.info(f"✅ NEW ENDPOINT SUCCESS: {len(transactions)} transactions in {query_time:.4f}s")
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        logger.error(f"❌ NEW ENDPOINT ERROR: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            "error": "Failed to fetch normalized transactions",
+            "message": str(e),
+            "endpoint": "transactions-normalized"
+        }), 500
+
+@app.route('/api/departments-normalized', methods=['GET'])
+def get_departments_normalized():
+    """
+    NEW: Get department summary from normalized table (reuses existing DB connection)
+    """
+    try:
+        logger.info("🚀 NEW ENDPOINT: /api/departments-normalized")
+        
+        # Use your existing database manager
+        db_mgr = get_db_manager()
+        
+        with db_mgr.engine.connect() as conn:
+            # Get department summary with SQL aggregation (super fast!)
+            dept_query = text("""
+                SELECT 
+                    department,
+                    location_type,
+                    COUNT(*) as transaction_count,
+                    SUM(CASE WHEN budget_impact = 'Booked' AND amount IS NOT NULL THEN amount ELSE 0 END) as booked_amount,
+                    SUM(CASE WHEN budget_impact = 'Reserved' AND estimated_amount IS NOT NULL THEN estimated_amount ELSE 0 END) as reserved_amount,
+                    COUNT(DISTINCT region) as region_count
+                FROM transactions_normalized
+                WHERE department != '' AND department IS NOT NULL
+                GROUP BY department, location_type
+                ORDER BY booked_amount + reserved_amount DESC
+            """)
+            
+            start_time = time.time()
+            result = conn.execute(dept_query)
+            query_time = time.time() - start_time
+            
+            departments = []
+            for row in result:
+                dept, location_type, tx_count, booked, reserved, regions = row
+                
+                department_data = {
+                    'name': dept,
+                    'location_type': location_type or 'Unknown',
+                    'transaction_count': tx_count,
+                    'booked_amount': float(booked) if booked else 0,
+                    'reserved_amount': float(reserved) if reserved else 0,
+                    'total_amount': (float(booked) if booked else 0) + (float(reserved) if reserved else 0),
+                    'region_count': regions
+                }
+                
+                departments.append(department_data)
+        
+        response_data = {
+            "departments": departments,
+            "summary": {
+                "total_departments": len(departments),
+                "query_time_seconds": round(query_time, 4),
+                "data_source": "transactions_normalized (AGGREGATED)",
+                "total_booked": sum(d['booked_amount'] for d in departments),
+                "total_reserved": sum(d['reserved_amount'] for d in departments)
+            }
+        }
+        
+        logger.info(f"✅ DEPARTMENTS SUCCESS: {len(departments)} departments in {query_time:.4f}s")
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        logger.error(f"❌ DEPARTMENTS ERROR: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/performance-comparison', methods=['GET'])
+def performance_comparison():
+    """
+    NEW: Compare performance between old JSON and new normalized approaches
+    """
+    try:
+        logger.info("🚀 PERFORMANCE COMPARISON")
+        
+        # Use your existing database manager
+        db_mgr = get_db_manager()
+        
+        # FAST METHOD: Normalized table
+        start_time = time.time()
+        with db_mgr.engine.connect() as conn:
+            fast_count = conn.execute(text("SELECT COUNT(*) FROM transactions_normalized")).scalar()
+            fast_direct_costs = conn.execute(text("SELECT COUNT(*) FROM transactions_normalized WHERE category = 'DIRECT_COST'")).scalar()
+        fast_time = time.time() - start_time
+        
+        # SLOW METHOD: JSON parsing (your current method)
+        start_time = time.time()
+        try:
+            json_data = get_processed_data_from_database("transactions")
+            json_data = safe_parse_json_fields(json_data)
+            slow_transactions = json_data.get('transactions', [])
+            slow_count = len(slow_transactions)
+            slow_direct_costs = len([tx for tx in slow_transactions if tx.get('category') == 'DIRECT_COST'])
+        except:
+            slow_count = 0
+            slow_direct_costs = 0
+        slow_time = time.time() - start_time
+        
+        # Calculate improvement
+        speed_improvement = round(slow_time / fast_time, 1) if fast_time > 0 else "∞"
+        
+        comparison = {
+            "fast_method": {
+                "source": "transactions_normalized table",
+                "total_transactions": fast_count,
+                "direct_costs": fast_direct_costs,
+                "query_time": round(fast_time, 4),
+                "method": "SQL with indexes"
+            },
+            "slow_method": {
+                "source": "JSON parsing from processing_results",
+                "total_transactions": slow_count,
+                "direct_costs": slow_direct_costs,
+                "query_time": round(slow_time, 4),
+                "method": "Load JSON + parse strings + filter in Python"
+            },
+            "improvement": {
+                "speed_multiplier": f"{speed_improvement}x faster",
+                "time_saved": round(slow_time - fast_time, 4),
+                "percentage_improvement": round(((slow_time - fast_time) / slow_time * 100), 1) if slow_time > 0 else 0
+            },
+            "recommendation": "Use normalized table for production" if fast_time < slow_time else "Further optimization needed"
+        }
+        
+        logger.info(f"⚡ PERFORMANCE: Normalized {speed_improvement}x faster ({fast_time:.4f}s vs {slow_time:.4f}s)")
+        
+        return jsonify(comparison)
+        
+    except Exception as e:
+        logger.error(f"❌ PERFORMANCE COMPARISON ERROR: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     # Check if database password is set before starting

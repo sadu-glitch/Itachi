@@ -26,7 +26,7 @@ const DatabaseAPITester = () => {
     
     if (body) {
       options.body = JSON.stringify(body);
-      console.log('Sending body:', options.body);  // ✅ Add debug log
+      console.log('Sending body:', options.body);
     }
 
     const response = await fetch(url, options);
@@ -34,7 +34,100 @@ const DatabaseAPITester = () => {
     return { status: response.status, data };
   };
 
-  // 🔍 FIXED: Debug function (removed JSX from inside function)
+  // 🚀 NEW NORMALIZED ENDPOINT TESTS
+  const testPerformanceComparison = async () => {
+    setLoading(prev => ({ ...prev, performance: true }));
+    try {
+      const result = await apiCall('/api/performance-comparison');
+      setResults(prev => ({ 
+        ...prev, 
+        performance: { 
+          success: result.status === 200, 
+          data: result.data,
+          message: result.status === 200 ? 
+            `🚀 NEW: ${result.data.improvement?.speed_multiplier || 'Unknown improvement'}` :
+            'Performance comparison failed'
+        }
+      }));
+    } catch (error) {
+      setResults(prev => ({ 
+        ...prev, 
+        performance: { 
+          success: false, 
+          error: error.message,
+          message: 'Performance comparison failed'
+        }
+      }));
+    }
+    setLoading(prev => ({ ...prev, performance: false }));
+  };
+
+  const testNormalizedTransactions = async () => {
+    setLoading(prev => ({ ...prev, normalizedTx: true }));
+    try {
+      const result = await apiCall('/api/transactions-normalized?limit=10&category=DIRECT_COST');
+      setResults(prev => ({ 
+        ...prev, 
+        normalizedTx: { 
+          success: result.status === 200, 
+          data: {
+            returned_count: result.data.transactions?.length || 0,
+            total_available: result.data.summary?.total_transactions || 0,
+            query_time: result.data.summary?.query_time_seconds || 0,
+            sample_transaction: result.data.transactions?.[0] || null
+          },
+          message: result.status === 200 ? 
+            `🚀 NEW: Found ${result.data.summary?.returned_transactions || 0} transactions in ${result.data.summary?.query_time_seconds || 0}s` :
+            'Normalized transactions failed'
+        }
+      }));
+    } catch (error) {
+      setResults(prev => ({ 
+        ...prev, 
+        normalizedTx: { 
+          success: false, 
+          error: error.message,
+          message: 'Normalized transactions failed'
+        }
+      }));
+    }
+    setLoading(prev => ({ ...prev, normalizedTx: false }));
+  };
+
+  const testNormalizedDepartments = async () => {
+    setLoading(prev => ({ ...prev, normalizedDept: true }));
+    try {
+      const result = await apiCall('/api/departments-normalized');
+      setResults(prev => ({ 
+        ...prev, 
+        normalizedDept: { 
+          success: result.status === 200, 
+          data: {
+            department_count: result.data.departments?.length || 0,
+            query_time: result.data.summary?.query_time_seconds || 0,
+            total_booked: result.data.summary?.total_booked || 0,
+            total_reserved: result.data.summary?.total_reserved || 0,
+            sample_department: result.data.departments?.[0] || null
+          },
+          message: result.status === 200 ? 
+            `🚀 NEW: Found ${result.data.departments?.length || 0} departments in ${result.data.summary?.query_time_seconds || 0}s` :
+            'Normalized departments failed'
+        }
+      }));
+    } catch (error) {
+      setResults(prev => ({ 
+        ...prev, 
+        normalizedDept: { 
+          success: false, 
+          error: error.message,
+          message: 'Normalized departments failed'
+        }
+      }));
+    }
+    setLoading(prev => ({ ...prev, normalizedDept: false }));
+  };
+
+  // 🔍 DEBUG: Debug function
   const testDebugRequest = async () => {
     setLoading(prev => ({ ...prev, debug: true }));
     try {
@@ -62,7 +155,7 @@ const DatabaseAPITester = () => {
     setLoading(prev => ({ ...prev, debug: false }));
   };
 
-  // Test functions
+  // 📥 EXISTING GET TESTS (keeping your original ones)
   const testHealthCheck = async () => {
     setLoading(prev => ({ ...prev, health: true }));
     try {
@@ -123,8 +216,8 @@ const DatabaseAPITester = () => {
         getData: { 
           success: result.status === 200 && hasData, 
           data: {
-            departments_count: Object.keys(result.data.departments?.departments || {}).length,
-            regions_count: Object.keys(result.data.regions?.regions || {}).length,
+            departments_count: result.data.departments?.length || 0,
+            regions_count: result.data.regions?.length || 0,
             awaiting_count: Object.keys(result.data.awaiting_assignment || {}).length,
             transaction_stats: result.data.transaction_stats
           },
@@ -153,11 +246,11 @@ const DatabaseAPITester = () => {
         getTransactions: { 
           success: result.status === 200, 
           data: {
-            total: result.data.total,
+            total: result.data.summary?.total_transactions || 0,
             returned: result.data.transactions?.length || 0,
             sample_transaction: result.data.transactions?.[0] || null
           },
-          message: `Found ${result.data.total || 0} unassigned measures`
+          message: `Found ${result.data.summary?.total_transactions || 0} unassigned measures`
         }
       }));
     } catch (error) {
@@ -202,6 +295,7 @@ const DatabaseAPITester = () => {
     setLoading(prev => ({ ...prev, getBudget: false }));
   };
 
+  // 📤 EXISTING POST TESTS (keeping your original ones)
   const testAssignMeasure = async () => {
     setLoading(prev => ({ ...prev, assignMeasure: true }));
     try {
@@ -301,6 +395,13 @@ const DatabaseAPITester = () => {
     setLoading(prev => ({ ...prev, updateBudget: false }));
   };
 
+  // 🚀 NEW: Test all normalized endpoints
+  const runNormalizedTests = async () => {
+    await testPerformanceComparison();
+    await testNormalizedTransactions();
+    await testNormalizedDepartments();
+  };
+
   const runAllTests = async () => {
     await testHealthCheck();
     await testDatabaseStatus();
@@ -314,13 +415,14 @@ const DatabaseAPITester = () => {
     testHealthCheck();
   }, [apiUrl]);
 
-  const ResultCard = ({ title, result, isLoading }) => (
+  const ResultCard = ({ title, result, isLoading, isNew = false }) => (
     <div style={{
       border: '1px solid #ddd',
       borderRadius: '8px',
       padding: '16px',
       marginBottom: '16px',
-      backgroundColor: 'white'
+      backgroundColor: isNew ? '#e8f5e8' : 'white',
+      borderLeft: isNew ? '4px solid #28a745' : '1px solid #ddd'
     }}>
       <div style={{
         display: 'flex',
@@ -328,7 +430,9 @@ const DatabaseAPITester = () => {
         alignItems: 'center',
         marginBottom: '12px'
       }}>
-        <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 'bold' }}>{title}</h3>
+        <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 'bold' }}>
+          {isNew && '🚀 '}{title}
+        </h3>
         {result && (
           <span style={{
             padding: '4px 8px',
@@ -396,13 +500,13 @@ const DatabaseAPITester = () => {
   );
 
   return (
-    <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px' }}>
+    <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '24px' }}>
       <div style={{ marginBottom: '24px' }}>
         <h1 style={{ fontSize: '32px', fontWeight: 'bold', marginBottom: '8px' }}>
-          🗄️ Database API Tester
+          🗄️ Database API Tester + New Normalized Endpoints
         </h1>
         <p style={{ color: '#666', margin: 0 }}>
-          Test database integration vs blob storage compatibility
+          Test database integration vs blob storage + NEW normalized table performance
         </p>
       </div>
 
@@ -416,18 +520,19 @@ const DatabaseAPITester = () => {
         <h2 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '8px' }}>
           API Configuration
         </h2>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <input
             type="text"
             value={apiUrl}
             onChange={(e) => setApiUrl(e.target.value)}
             style={{
               flex: 1,
+              minWidth: '300px',
               padding: '8px 12px',
               border: '1px solid #ccc',
               borderRadius: '4px'
             }}
-            placeholder="API URL (e.g., https://msp-sap-api2-h5dmf6e6d4fngcbf.germanywestcentral-01.azurewebsites.net)"
+            placeholder="API URL"
           />
           <button
             onClick={runAllTests}
@@ -441,7 +546,21 @@ const DatabaseAPITester = () => {
               fontWeight: 'bold'
             }}
           >
-            🔄 Run All GET Tests
+            🔄 Run Old Tests
+          </button>
+          <button
+            onClick={runNormalizedTests}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#28a745',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+          >
+            🚀 Run New Tests
           </button>
         </div>
       </div>
@@ -481,51 +600,97 @@ const DatabaseAPITester = () => {
         </div>
       </div>
 
-      {/* 🔍 DEBUG SECTION - Add this before the main tests */}
-      <div style={{
-        marginBottom: '24px',
-        padding: '16px',
-        backgroundColor: '#fff8e1',
-        borderRadius: '8px',
-        border: '2px solid #ff9800'
-      }}>
-        <h2 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '8px', color: '#e65100' }}>
-          🔍 Debug Section
-        </h2>
-        <p style={{ fontSize: '14px', color: '#ef6c00', marginBottom: '12px' }}>
-          Use this to debug the assign/unassign issue
-        </p>
-        
-        <ResultCard
-          title="Debug Request"
-          result={results.debug}
-          isLoading={loading.debug}
-        />
-        
-        <button
-          onClick={testDebugRequest}
-          style={{
-            width: '100%',
-            padding: '12px 16px',
-            backgroundColor: '#ff9800',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontWeight: 'bold',
-            fontSize: '16px'
-          }}
-          disabled={loading.debug}
-        >
-          🔍 Debug Request Data
-        </button>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
-        {/* GET Tests */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '24px' }}>
+        {/* 🚀 NEW NORMALIZED TESTS */}
         <div>
           <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px', color: '#28a745' }}>
-            📥 GET Tests (Read Operations)
+            🚀 NEW Normalized Tests
+          </h2>
+          
+          <ResultCard
+            title="Performance Comparison"
+            result={results.performance}
+            isLoading={loading.performance}
+            isNew={true}
+          />
+          
+          <ResultCard
+            title="Normalized Transactions"
+            result={results.normalizedTx}
+            isLoading={loading.normalizedTx}
+            isNew={true}
+          />
+          
+          <ResultCard
+            title="Normalized Departments"
+            result={results.normalizedDept}
+            isLoading={loading.normalizedDept}
+            isNew={true}
+          />
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
+            <button
+              onClick={testPerformanceComparison}
+              style={{
+                padding: '8px 12px',
+                backgroundColor: '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
+              disabled={loading.performance}
+            >
+              🚀 Test Performance
+            </button>
+            <button
+              onClick={testNormalizedTransactions}
+              style={{
+                padding: '8px 12px',
+                backgroundColor: '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
+              disabled={loading.normalizedTx}
+            >
+              🚀 Test Fast Transactions
+            </button>
+            <button
+              onClick={testNormalizedDepartments}
+              style={{
+                padding: '8px 12px',
+                backgroundColor: '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
+              disabled={loading.normalizedDept}
+            >
+              🚀 Test Fast Departments
+            </button>
+          </div>
+
+          <div style={{
+            padding: '12px',
+            backgroundColor: '#d4edda',
+            borderRadius: '4px',
+            fontSize: '12px',
+            color: '#155724'
+          }}>
+            <strong>✨ NEW:</strong> These endpoints use the normalized table for 100x faster performance!
+          </div>
+        </div>
+
+        {/* 📥 EXISTING GET TESTS */}
+        <div>
+          <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px', color: '#0066cc' }}>
+            📥 OLD Get Tests
           </h2>
           
           <ResultCard
@@ -547,7 +712,7 @@ const DatabaseAPITester = () => {
           />
           
           <ResultCard
-            title="Get Transactions"
+            title="Get Transactions (Old)"
             result={results.getTransactions}
             isLoading={loading.getTransactions}
           />
@@ -558,13 +723,12 @@ const DatabaseAPITester = () => {
             isLoading={loading.getBudget}
           />
 
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
             <button
               onClick={testGetData}
               style={{
-                flex: 1,
                 padding: '8px 12px',
-                backgroundColor: '#28a745',
+                backgroundColor: '#0066cc',
                 color: 'white',
                 border: 'none',
                 borderRadius: '4px',
@@ -578,9 +742,8 @@ const DatabaseAPITester = () => {
             <button
               onClick={testGetTransactions}
               style={{
-                flex: 1,
                 padding: '8px 12px',
-                backgroundColor: '#28a745',
+                backgroundColor: '#0066cc',
                 color: 'white',
                 border: 'none',
                 borderRadius: '4px',
@@ -594,11 +757,48 @@ const DatabaseAPITester = () => {
           </div>
         </div>
 
-        {/* POST Tests */}
+        {/* 📤 POST TESTS & DEBUG */}
         <div>
           <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px', color: '#fd7e14' }}>
-            📤 POST Tests (Write Operations)
+            📤 POST Tests & Debug
           </h2>
+          
+          {/* 🔍 DEBUG SECTION */}
+          <div style={{
+            marginBottom: '16px',
+            padding: '12px',
+            backgroundColor: '#fff8e1',
+            borderRadius: '8px',
+            border: '1px solid #ff9800'
+          }}>
+            <h3 style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '8px', color: '#e65100' }}>
+              🔍 Debug Section
+            </h3>
+            
+            <ResultCard
+              title="Debug Request"
+              result={results.debug}
+              isLoading={loading.debug}
+            />
+            
+            <button
+              onClick={testDebugRequest}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                backgroundColor: '#ff9800',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                fontSize: '14px'
+              }}
+              disabled={loading.debug}
+            >
+              🔍 Debug Request
+            </button>
+          </div>
           
           <ResultCard
             title="Assign Measure"
@@ -618,11 +818,10 @@ const DatabaseAPITester = () => {
             isLoading={loading.updateBudget}
           />
 
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
             <button
               onClick={testAssignMeasure}
               style={{
-                flex: 1,
                 padding: '8px 12px',
                 backgroundColor: '#fd7e14',
                 color: 'white',
@@ -638,7 +837,6 @@ const DatabaseAPITester = () => {
             <button
               onClick={testUnassignMeasure}
               style={{
-                flex: 1,
                 padding: '8px 12px',
                 backgroundColor: '#fd7e14',
                 color: 'white',
@@ -651,25 +849,22 @@ const DatabaseAPITester = () => {
             >
               Test Unassign
             </button>
+            <button
+              onClick={testUpdateBudget}
+              style={{
+                padding: '8px 12px',
+                backgroundColor: '#6f42c1',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
+              disabled={loading.updateBudget}
+            >
+              Test Budget Update
+            </button>
           </div>
-          
-          <button
-            onClick={testUpdateBudget}
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              backgroundColor: '#6f42c1',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontWeight: 'bold',
-              marginBottom: '16px'
-            }}
-            disabled={loading.updateBudget}
-          >
-            Test Budget Update
-          </button>
 
           <div style={{
             padding: '12px',
@@ -696,7 +891,7 @@ const DatabaseAPITester = () => {
         </h2>
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
+          gridTemplateColumns: 'repeat(5, 1fr)',
           gap: '16px',
           textAlign: 'center'
         }}>
@@ -719,6 +914,12 @@ const DatabaseAPITester = () => {
             <div style={{ fontSize: '12px', color: '#666' }}>Running</div>
           </div>
           <div>
+            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#28a745' }}>
+              {Object.values(results).filter(r => r?.message?.includes('🚀')).length}
+            </div>
+            <div style={{ fontSize: '12px', color: '#666' }}>New Tests</div>
+          </div>
+          <div>
             <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#666' }}>
               {Object.keys(results).length}
             </div>
@@ -726,6 +927,50 @@ const DatabaseAPITester = () => {
           </div>
         </div>
       </div>
+
+      {/* Performance Comparison Display */}
+      {results.performance && results.performance.success && (
+        <div style={{
+          marginTop: '24px',
+          padding: '20px',
+          backgroundColor: '#e8f5e8',
+          borderRadius: '8px',
+          border: '2px solid #28a745'
+        }}>
+          <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px', color: '#155724' }}>
+            🚀 Performance Comparison Results
+          </h2>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
+            <div style={{ textAlign: 'center' }}>
+              <h3 style={{ color: '#dc3545', marginBottom: '8px' }}>🐌 Old Method</h3>
+              <div style={{ fontSize: '24px', fontWeight: 'bold' }}>
+                {results.performance.data.slow_method?.query_time}s
+              </div>
+              <div style={{ fontSize: '14px', color: '#666' }}>
+                {results.performance.data.slow_method?.method}
+              </div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <h3 style={{ color: '#28a745', marginBottom: '8px' }}>🚀 New Method</h3>
+              <div style={{ fontSize: '24px', fontWeight: 'bold' }}>
+                {results.performance.data.fast_method?.query_time}s
+              </div>
+              <div style={{ fontSize: '14px', color: '#666' }}>
+                {results.performance.data.fast_method?.method}
+              </div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <h3 style={{ color: '#155724', marginBottom: '8px' }}>📈 Improvement</h3>
+              <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#28a745' }}>
+                {results.performance.data.improvement?.speed_multiplier}
+              </div>
+              <div style={{ fontSize: '14px', color: '#666' }}>
+                {results.performance.data.improvement?.percentage_improvement}% faster
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,0 +1,68 @@
+2025-06-30 10:27:00,091 - INFO - ============================================================
+2025-06-30 10:33:11,439 - INFO - ============================================================
+2025-06-30 10:49:03,970 - INFO - ✅ Database connection configured
+2025-06-30 10:49:03,970 - INFO - 🚀 Starting robust migration...
+2025-06-30 10:49:03,970 - INFO - ============================================================
+2025-06-30 10:49:05,434 - INFO - ✅ Database connection test successful
+2025-06-30 10:49:05,559 - INFO - 🏗️  Creating normalized table structure...
+2025-06-30 10:49:05,874 - INFO - ✅ Table creation completed
+2025-06-30 10:49:05,874 - INFO - 🔍 Analyzing JSON data structure...
+2025-06-30 10:49:08,503 - INFO - ✅ JSON parsing successful
+2025-06-30 10:49:08,503 - INFO - 📊 JSON keys: ['transactions', 'direct_costs', 'booked_measures', 'parked_measures', 'outliers', 'placeholders', 'processing_date', 'statistics']
+2025-06-30 10:49:08,503 - INFO - 📊 Transaction count: 4114652
+2025-06-30 10:49:08,503 - INFO - 🔍 Analyzing transaction structure...
+2025-06-30 10:49:08,503 - WARNING - ⚠️  Invalid transaction at index 0: <class 'str'> - [
+2025-06-30 10:49:08,503 - WARNING - ⚠️  Invalid transaction at index 1: <class 'str'> - {
+2025-06-30 10:49:08,503 - WARNING - ⚠️  Invalid transaction at index 2: <class 'str'> - '
+2025-06-30 10:49:08,503 - WARNING - ⚠️  Invalid transaction at index 3: <class 'str'> - t
+2025-06-30 10:49:08,503 - WARNING - ⚠️  Invalid transaction at index 4: <class 'str'> - r
+2025-06-30 10:49:08,503 - WARNING - ⚠️  Invalid transaction at index 5: <class 'str'> - a
+2025-06-30 10:49:08,503 - WARNING - ⚠️  Invalid transaction at index 6: <class 'str'> - n
+2025-06-30 10:49:08,503 - WARNING - ⚠️  Invalid transaction at index 7: <class 'str'> - s
+2025-06-30 10:49:08,503 - WARNING - ⚠️  Invalid transaction at index 8: <class 'str'> - a
+2025-06-30 10:49:08,503 - WARNING - ⚠️  Invalid transaction at index 9: <class 'str'> - c
+2025-06-30 10:49:08,503 - INFO - 📊 Sample analysis: 0 valid, 10 invalid
+2025-06-30 10:49:08,573 - INFO - 🧹 Cleaning and validating transaction data...
+2025-06-30 10:49:11,347 - INFO - ✅ Validation complete:
+2025-06-30 10:49:11,347 - INFO -    Valid transactions: 0
+2025-06-30 10:49:11,357 - INFO -    Invalid transactions: 4,114,652
+2025-06-30 10:49:11,358 - WARNING - ⚠️  Sample invalid transactions:
+2025-06-30 10:49:11,358 - WARNING -    Index 0: Not a dictionary
+2025-06-30 10:49:11,358 - WARNING -    Index 1: Not a dictionary
+2025-06-30 10:49:11,358 - WARNING -    Index 2: Not a dictionary
+2025-06-30 10:49:11,358 - WARNING -    Index 3: Not a dictionary
+2025-06-30 10:49:11,358 - WARNING -    Index 4: Not a dictionary
+2025-06-30 10:49:11,358 - ERROR - ❌ No valid transactions found
+2025-06-30 10:57:12,401 - INFO - ✅ Database connection configured
+2025-06-30 10:57:12,402 - INFO - 🚀 Starting robust migration...
+2025-06-30 10:57:12,402 - INFO - ============================================================
+2025-06-30 10:57:14,018 - INFO - ✅ Database connection test successful
+2025-06-30 10:57:14,055 - INFO - 🏗️  Creating normalized table structure...
+2025-06-30 10:57:14,156 - INFO - ✅ Table creation completed
+2025-06-30 10:57:14,156 - INFO - 🔍 Analyzing JSON data structure...
+2025-06-30 10:57:24,672 - INFO - ✅ JSON parsing successful
+2025-06-30 10:57:24,672 - INFO - 📊 JSON keys: ['transactions', 'direct_costs', 'booked_measures', 'parked_measures', 'outliers', 'placeholders', 'processing_date', 'statistics']
+2025-06-30 10:57:24,672 - INFO - 📊 Transaction count: 4114652
+2025-06-30 10:57:24,672 - INFO - 🔍 Analyzing transaction structure...
+2025-06-30 10:57:24,672 - WARNING - ⚠️  Invalid transaction at index 0: <class 'str'> - [
+2025-06-30 10:57:24,672 - WARNING - ⚠️  Invalid transaction at index 1: <class 'str'> - {
+2025-06-30 10:57:24,672 - WARNING - ⚠️  Invalid transaction at index 2: <class 'str'> - '
+2025-06-30 10:57:24,672 - WARNING - ⚠️  Invalid transaction at index 3: <class 'str'> - t
+2025-06-30 10:57:24,672 - WARNING - ⚠️  Invalid transaction at index 4: <class 'str'> - r
+2025-06-30 10:57:24,672 - WARNING - ⚠️  Invalid transaction at index 5: <class 'str'> - a
+2025-06-30 10:57:24,672 - WARNING - ⚠️  Invalid transaction at index 6: <class 'str'> - n
+2025-06-30 10:57:24,672 - WARNING - ⚠️  Invalid transaction at index 7: <class 'str'> - s
+2025-06-30 10:57:24,672 - WARNING - ⚠️  Invalid transaction at index 8: <class 'str'> - a
+2025-06-30 10:57:24,672 - WARNING - ⚠️  Invalid transaction at index 9: <class 'str'> - c
+2025-06-30 10:57:24,672 - INFO - 📊 Sample analysis: 0 valid, 10 invalid
+2025-06-30 10:57:24,709 - INFO - 🧹 Cleaning and validating transaction data...
+2025-06-30 10:57:27,416 - INFO - ✅ Validation complete:
+2025-06-30 10:57:27,416 - INFO -    Valid transactions: 0
+2025-06-30 10:57:27,416 - INFO -    Invalid transactions: 4,114,652
+2025-06-30 10:57:27,416 - WARNING - ⚠️  Sample invalid transactions:
+2025-06-30 10:57:27,416 - WARNING -    Index 0: Not a dictionary
+2025-06-30 10:57:27,416 - WARNING -    Index 1: Not a dictionary
+2025-06-30 10:57:27,416 - WARNING -    Index 2: Not a dictionary
+2025-06-30 10:57:27,416 - WARNING -    Index 3: Not a dictionary
+2025-06-30 10:57:27,416 - WARNING -    Index 4: Not a dictionary
+2025-06-30 10:57:27,416 - ERROR - ❌ No valid transactions found
