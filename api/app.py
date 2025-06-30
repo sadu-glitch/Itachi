@@ -1156,6 +1156,192 @@ def debug_assignment(bestellnummer):
     except Exception as e:
         logger.error(f"Debug error: {str(e)}")
         return jsonify({"error": str(e)}), 500
+    
+@app.route('/api/assign-measure-safe', methods=['POST'])
+def assign_measure_safe():
+    """SAFE VERSION: Assignment with step-by-step error isolation"""
+    try:
+        logger.info("🔍 SAFE ASSIGNMENT: Starting...")
+        
+        # STEP 1: Get request data
+        assignment = request.get_json()
+        logger.info(f"📥 Request data received: {assignment}")
+        
+        if not assignment or 'bestellnummer' not in assignment:
+            return jsonify({"status": "error", "message": "Invalid request data"}), 400
+        
+        bestellnummer = assignment['bestellnummer']
+        region = assignment.get('region', '')
+        district = assignment.get('district', '')
+        
+        logger.info(f"🎯 Processing assignment: {bestellnummer} → {region}/{district}")
+        
+        # STEP 2: Load data (we know this works from debug)
+        try:
+            transactions = get_processed_data_from_database("transactions")
+            transactions = safe_parse_json_fields(transactions)
+            logger.info("✅ Data loaded successfully")
+        except Exception as e:
+            logger.error(f"❌ Data loading failed: {str(e)}")
+            return jsonify({"status": "error", "message": f"Data loading error: {str(e)}"}), 500
+        
+        # STEP 3: Find and modify the measure (ISOLATED TEST)
+        measure_found = False
+        original_measure_data = None
+        
+        try:
+            logger.info(f"🔍 Searching for measure {bestellnummer}...")
+            
+            # Find in parked_measures
+            for i, measure in enumerate(transactions['parked_measures']):
+                if measure.get('bestellnummer') == bestellnummer:
+                    measure_found = True
+                    original_measure_data = measure.copy()  # Keep backup
+                    
+                    logger.info(f"✅ Found measure at index {i}: {measure.get('measure_title')}")
+                    
+                    # Make the assignment changes
+                    measure['manual_assignment'] = {
+                        'region': region,
+                        'district': district
+                    }
+                    measure['region'] = region
+                    measure['district'] = district
+                    measure['status'] = 'Manually assigned, awaiting SAP'
+                    if measure.get('category') == 'UNASSIGNED_MEASURE':
+                        measure['category'] = 'PARKED_MEASURE'
+                    
+                    logger.info(f"✅ Updated measure in parked_measures")
+                    break
+            
+            if not measure_found:
+                logger.error(f"❌ Measure {bestellnummer} not found in parked_measures")
+                return jsonify({
+                    "status": "error", 
+                    "message": f"Measure {bestellnummer} not found"
+                }), 404
+            
+            # Find and update in main transactions array
+            tx_found = False
+            for tx in transactions['transactions']:
+                if tx.get('bestellnummer') == bestellnummer:
+                    tx['manual_assignment'] = {'region': region, 'district': district}
+                    tx['region'] = region
+                    tx['district'] = district
+                    tx['status'] = 'Manually assigned, awaiting SAP'
+                    if tx.get('category') == 'UNASSIGNED_MEASURE':
+                        tx['category'] = 'PARKED_MEASURE'
+                    tx_found = True
+                    logger.info(f"✅ Updated measure in main transactions")
+                    break
+            
+            if not tx_found:
+                logger.warning(f"⚠️ Measure {bestellnummer} not found in main transactions (this might be OK)")
+            
+        except Exception as e:
+            logger.error(f"❌ Error during measure modification: {str(e)}")
+            return jsonify({"status": "error", "message": f"Modification error: {str(e)}"}), 500
+        
+        # STEP 4: TEST JSON SERIALIZATION BEFORE DATABASE SAVE
+        try:
+            logger.info("🧪 Testing JSON serialization...")
+            
+            # Test if we can serialize the modified data
+            test_json = json.dumps(transactions, cls=JSONEncoder, separators=(',', ':'))
+            logger.info(f"✅ JSON serialization test passed: {len(test_json)} characters")
+            
+            # Also test the specific data we're trying to save
+            clean_data = make_json_serializable(transactions)
+            test_clean_json = json.dumps(clean_data, cls=JSONEncoder, separators=(',', ':'))
+            logger.info(f"✅ Clean data serialization test passed: {len(test_clean_json)} characters")
+            
+        except Exception as e:
+            logger.error(f"❌ JSON serialization test FAILED: {str(e)}")
+            # Restore original data before returning error
+            if original_measure_data:
+                for measure in transactions['parked_measures']:
+                    if measure.get('bestellnummer') == bestellnummer:
+                        measure.update(original_measure_data)
+                        break
+            
+            return jsonify({
+                "status": "error", 
+                "message": f"Data serialization error: {str(e)}",
+                "error_type": "serialization_error"
+            }), 500
+        
+        # STEP 5: ATTEMPT DATABASE SAVE WITH DETAILED ERROR HANDLING
+        try:
+            logger.info("💾 Attempting database save...")
+            
+            # Use a shorter timeout for the save operation
+            save_to_database_as_json("transactions", transactions)
+            
+            logger.info("✅ Database save completed successfully")
+            
+        except Exception as e:
+            logger.error(f"❌ Database save FAILED: {str(e)}")
+            
+            # Restore original data
+            if original_measure_data:
+                for measure in transactions['parked_measures']:
+                    if measure.get('bestellnummer') == bestellnummer:
+                        measure.update(original_measure_data)
+                        break
+                        
+            return jsonify({
+                "status": "error", 
+                "message": f"Database save failed: {str(e)}",
+                "error_type": "database_save_error"
+            }), 500
+        
+        # STEP 6: SUCCESS
+        success_message = f"Measure {bestellnummer} assigned to {region}/{district}"
+        logger.info(f"✅ {success_message}")
+        
+        return jsonify({
+            "status": "success", 
+            "message": success_message,
+            "assignment": {
+                "bestellnummer": bestellnummer,
+                "region": region,
+                "district": district
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ CRITICAL ERROR in safe assignment: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        return jsonify({
+            "status": "error", 
+            "message": f"Critical error: {str(e)}",
+            "error_type": type(e).__name__
+        }), 500
+
+
+# STEP 7: CREATE A MINIMAL TEST ENDPOINT
+@app.route('/api/test-save', methods=['POST'])
+def test_save():
+    """Test endpoint to isolate database save issues"""
+    try:
+        data = request.get_json()
+        test_data = {
+            "test": "data",
+            "timestamp": datetime.now().isoformat(),
+            "input": data
+        }
+        
+        logger.info("🧪 Testing database save with simple data...")
+        save_to_database_as_json("test_save", test_data)
+        logger.info("✅ Test save successful")
+        
+        return jsonify({"status": "success", "message": "Test save completed"})
+        
+    except Exception as e:
+        logger.error(f"❌ Test save failed: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/budget-allocation', methods=['GET', 'POST'])
 def budget_allocation():
