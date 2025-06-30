@@ -12,6 +12,8 @@ from urllib.parse import unquote
 import ast
 from sqlalchemy import text
 import time
+from msp_sap_integration_fixed import make_json_serializable
+
 
 # Database-integrated imports
 try:
