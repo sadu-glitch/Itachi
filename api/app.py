@@ -871,297 +871,9 @@ def get_transactions_fixed():
             "message": str(e)
         }), 500
 
-@app.route('/api/assign-measure', methods=['POST'])
-def assign_measure():
-    """Manually assign a parked measure to a region/district, or unassign - ENHANCED VERSION"""
-    try:
-        logger.info("🔍 Assignment request received")
-        
-        # STEP 1: Get and validate request data
-        try:
-            assignment = request.get_json()
-            logger.info(f"📥 Request data: {assignment}")
-        except Exception as e:
-            logger.error(f"❌ Failed to parse request JSON: {str(e)}")
-            return jsonify({
-                "status": "error", 
-                "message": f"Invalid JSON in request: {str(e)}"
-            }), 400
-
-        # STEP 2: Validate data structure
-        if not isinstance(assignment, dict):
-            logger.error(f"❌ Invalid data type: expected dict, got {type(assignment)}")
-            return jsonify({
-                "status": "error", 
-                "message": f"Expected dict, got {type(assignment)}",
-                "received_data": str(assignment)
-            }), 400
-
-        # STEP 3: Check if this is an unassign operation
-        is_unassign = (assignment.get('region') == '' and assignment.get('district') == '') or assignment.get('unassign', False)
-        logger.info(f"🔄 Operation type: {'unassign' if is_unassign else 'assign'}")
-        
-        # STEP 4: Validate required fields
-        if not is_unassign:
-            required_fields = ['bestellnummer', 'region', 'district']
-            missing_fields = [field for field in required_fields if field not in assignment or not assignment[field]]
-            if missing_fields:
-                logger.error(f"❌ Missing fields: {missing_fields}")
-                return jsonify({
-                    "status": "error", 
-                    "message": f"Missing required fields: {', '.join(missing_fields)}"
-                }), 400
-        else:
-            # For unassign, only bestellnummer is required
-            if 'bestellnummer' not in assignment:
-                logger.error("❌ Missing bestellnummer for unassign")
-                return jsonify({
-                    "status": "error", 
-                    "message": "Missing required field: bestellnummer"
-                }), 400
-        
-        # STEP 5: Get the current transactions from database with enhanced error handling
-        try:
-            logger.info("📊 Loading transactions from database...")
-            transactions = get_processed_data_from_database("transactions")
-            logger.info(f"✅ Raw transactions loaded: {type(transactions)}")
-            
-            if not isinstance(transactions, dict):
-                logger.error(f"❌ Invalid transactions format: expected dict, got {type(transactions)}")
-                return jsonify({
-                    "status": "error", 
-                    "message": f"Database returned invalid format: {type(transactions)}"
-                }), 500
-                
-        except Exception as e:
-            logger.error(f"❌ Failed to load transactions from database: {str(e)}")
-            return jsonify({
-                "status": "error", 
-                "message": f"Database error: {str(e)}"
-            }), 500
-        
-        # STEP 6: Parse transactions data with enhanced error handling
-        try:
-            logger.info("🔧 Parsing transactions data...")
-            transactions = safe_parse_json_fields(transactions) 
-            logger.info(f"✅ Transactions parsed successfully")
-            
-            # Validate parsed data structure
-            if 'parked_measures' not in transactions:
-                logger.error("❌ No parked_measures in transactions data")
-                return jsonify({
-                    "status": "error", 
-                    "message": "Invalid data structure: missing parked_measures"
-                }), 500
-                
-            if 'transactions' not in transactions:
-                logger.error("❌ No transactions in transactions data")
-                return jsonify({
-                    "status": "error", 
-                    "message": "Invalid data structure: missing transactions array"
-                }), 500
-                
-            logger.info(f"📊 Data structure validated: {len(transactions['parked_measures'])} parked measures, {len(transactions['transactions'])} transactions")
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to parse transactions data: {str(e)}")
-            return jsonify({
-                "status": "error", 
-                "message": f"Data parsing error: {str(e)}"
-            }), 500
-        
-        # STEP 7: Find the measure to update with enhanced logging
-        measure_found = False
-        action_message = ""
-        bestellnummer = assignment['bestellnummer']
-        
-        logger.info(f"🔍 Looking for measure with bestellnummer: {bestellnummer}")
-        
-        if is_unassign:
-            # Unassign logic
-            logger.info("🔄 Processing unassign operation...")
-            for measure in transactions['parked_measures']:
-                if measure['bestellnummer'] == bestellnummer:
-                    measure_found = True
-                    logger.info(f"✅ Found measure in parked_measures: {measure.get('measure_title', 'No title')}")
-                    measure['manual_assignment'] = None
-                    measure['region'] = ''
-                    measure['district'] = ''
-                    measure['status'] = 'Awaiting Assignment'
-                    if measure.get('category') == 'PARKED_MEASURE':
-                        measure['category'] = 'UNASSIGNED_MEASURE'
-                    break
-            
-            # Also update in transactions list
-            for tx in transactions['transactions']:
-                if (tx.get('bestellnummer') == bestellnummer and 
-                    tx.get('status') == 'Manually assigned, awaiting SAP'):
-                    measure_found = True
-                    logger.info(f"✅ Found measure in transactions list")
-                    tx['manual_assignment'] = None
-                    tx['region'] = ''
-                    tx['district'] = ''
-                    tx['status'] = 'Awaiting Assignment'
-                    if tx.get('category') == 'PARKED_MEASURE':
-                        tx['category'] = 'UNASSIGNED_MEASURE'
-                    break
-                    
-            action_message = f"Measure {bestellnummer} moved back to awaiting assignment"
-            
-        else:
-            # Normal assign logic
-            logger.info(f"🔄 Processing assign operation to {assignment['region']}/{assignment['district']}...")
-            for measure in transactions['parked_measures']:
-                if measure['bestellnummer'] == bestellnummer:
-                    measure_found = True
-                    logger.info(f"✅ Found measure in parked_measures: {measure.get('measure_title', 'No title')}")
-                    measure['manual_assignment'] = {
-                        'region': assignment['region'],
-                        'district': assignment['district']
-                    }
-                    measure['region'] = assignment['region']
-                    measure['district'] = assignment['district']
-                    measure['status'] = 'Manually assigned, awaiting SAP'
-                    
-                    # Update category in parked_measures
-                    if measure.get('category') == 'UNASSIGNED_MEASURE':
-                        measure['category'] = 'PARKED_MEASURE'
-                    
-                    # Also update in the transactions list
-                    for tx in transactions['transactions']:
-                        if tx.get('bestellnummer') == bestellnummer:
-                            logger.info(f"✅ Updated corresponding transaction")
-                            tx['manual_assignment'] = measure['manual_assignment']
-                            tx['region'] = assignment['region']
-                            tx['district'] = assignment['district']
-                            tx['status'] = 'Manually assigned, awaiting SAP'
-                            
-                            if tx.get('category') == 'UNASSIGNED_MEASURE':
-                                tx['category'] = 'PARKED_MEASURE'
-                            break
-                    break
-                    
-            action_message = f"Measure {bestellnummer} assigned to {assignment['region']}/{assignment['district']}"
-        
-        # STEP 8: Check if measure was found
-        if not measure_found:
-            logger.error(f"❌ Measure {bestellnummer} not found")
-            # Let's debug what measures we have
-            available_measures = [m.get('bestellnummer') for m in transactions['parked_measures'] if 'bestellnummer' in m]
-            logger.info(f"🔍 Available bestellnummern: {available_measures[:10]}...")  # Log first 10
-            
-            return jsonify({
-                "status": "error", 
-                "message": f"Measure with bestellnummer {bestellnummer} not found",
-                "debug_info": {
-                    "total_parked_measures": len(transactions['parked_measures']),
-                    "sample_bestellnummern": available_measures[:5]
-                }
-            }), 404
-        
-        # STEP 9: Save with enhanced retry logic and detailed error handling
-        logger.info("💾 Saving updated transactions to database...")
-        max_retries = 3
-        last_error = None
-        
-        for attempt in range(max_retries):
-            try:
-                logger.info(f"💾 Save attempt {attempt + 1}/{max_retries}")
-                save_to_database_as_json("transactions", transactions)
-                logger.info(f"✅ Successfully saved on attempt {attempt + 1}")
-                break
-                
-            except Exception as save_error:
-                last_error = save_error
-                logger.warning(f"⚠️ Save attempt {attempt + 1} failed: {str(save_error)}")
-                
-                if attempt == max_retries - 1:
-                    logger.error(f"❌ All {max_retries} save attempts failed. Last error: {str(save_error)}")
-                    return jsonify({
-                        "status": "error", 
-                        "message": f"Failed to save assignment after {max_retries} attempts: {str(save_error)}"
-                    }), 500
-                else:
-                    time.sleep(1)  # Wait 1 second before retry
-        
-        # STEP 10: Success response
-        logger.info(f"✅ Assignment completed successfully: {action_message}")
-        return jsonify({
-            "status": "success", 
-            "message": action_message,
-            "debug_info": {
-                "bestellnummer": bestellnummer,
-                "operation": "unassign" if is_unassign else "assign",
-                "timestamp": datetime.now().isoformat()
-            }
-        })
-        
-    except Exception as e:
-        # STEP 11: Catch-all error handler with detailed logging
-        logger.error(f"❌ CRITICAL ERROR in assign_measure: {str(e)}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        
-        return jsonify({
-            "status": "error", 
-            "message": f"Internal server error: {str(e)}",
-            "error_type": type(e).__name__,
-            "timestamp": datetime.now().isoformat()
-        }), 500
-    
-@app.route('/api/debug-assignment/<int:bestellnummer>', methods=['GET'])
-def debug_assignment(bestellnummer):
-    """Debug endpoint to check if a specific measure exists"""
-    try:
-        logger.info(f"🔍 DEBUG: Looking for bestellnummer {bestellnummer}")
-        
-        # Load transactions
-        transactions = get_processed_data_from_database("transactions")
-        transactions = safe_parse_json_fields(transactions)
-        
-        # Search in parked measures
-        found_in_parked = None
-        for measure in transactions.get('parked_measures', []):
-            if measure.get('bestellnummer') == bestellnummer:
-                found_in_parked = {
-                    'title': measure.get('measure_title'),
-                    'status': measure.get('status'),
-                    'category': measure.get('category'),
-                    'department': measure.get('department')
-                }
-                break
-        
-        # Search in all transactions
-        found_in_transactions = None
-        for tx in transactions.get('transactions', []):
-            if tx.get('bestellnummer') == bestellnummer:
-                found_in_transactions = {
-                    'category': tx.get('category'),
-                    'status': tx.get('status'),
-                    'department': tx.get('department')
-                }
-                break
-        
-        # Get sample of available bestellnummern
-        all_parked_bestellnummern = [m.get('bestellnummer') for m in transactions.get('parked_measures', []) if 'bestellnummer' in m]
-        
-        return jsonify({
-            "searched_bestellnummer": bestellnummer,
-            "found_in_parked_measures": found_in_parked,
-            "found_in_transactions": found_in_transactions,
-            "total_parked_measures": len(transactions.get('parked_measures', [])),
-            "total_transactions": len(transactions.get('transactions', [])),
-            "sample_parked_bestellnummern": sorted(all_parked_bestellnummern)[:20],
-            "bestellnummer_type": type(bestellnummer).__name__
-        })
-        
-    except Exception as e:
-        logger.error(f"Debug error: {str(e)}")
-        return jsonify({"error": str(e)}), 500
-    
 @app.route('/api/assign-measure-safe', methods=['POST'])
 def assign_measure_safe():
-    """SAFE VERSION: Assignment with step-by-step error isolation"""
+    """SAFE VERSION with connection reset: Assignment with step-by-step error isolation"""
     try:
         logger.info("🔍 SAFE ASSIGNMENT: Starting...")
         
@@ -1244,7 +956,7 @@ def assign_measure_safe():
             logger.error(f"❌ Error during measure modification: {str(e)}")
             return jsonify({"status": "error", "message": f"Modification error: {str(e)}"}), 500
         
-        # STEP 4: TEST JSON SERIALIZATION BEFORE DATABASE SAVE
+        # STEP 4: TEST JSON SERIALIZATION BEFORE DATABASE SAVE (keeping this since it works)
         try:
             logger.info("🧪 Testing JSON serialization...")
             
@@ -1272,11 +984,22 @@ def assign_measure_safe():
                 "error_type": "serialization_error"
             }), 500
         
-        # STEP 5: ATTEMPT DATABASE SAVE WITH DETAILED ERROR HANDLING
+        # STEP 5: ATTEMPT DATABASE SAVE WITH CONNECTION RESET
         try:
-            logger.info("💾 Attempting database save...")
+            logger.info("💾 Attempting database save with connection reset...")
             
-            # Use a shorter timeout for the save operation
+            # Reset database connection before save
+            try:
+                global db_manager
+                if db_manager and hasattr(db_manager, 'engine'):
+                    logger.info("🔄 Resetting database connection...")
+                    db_manager.engine.dispose()
+                    db_manager._setup_connection()
+                    logger.info("✅ Database connection reset successful")
+            except Exception as reset_error:
+                logger.warning(f"⚠️ Connection reset failed, continuing anyway: {reset_error}")
+            
+            # Try the save operation with connection timeout
             save_to_database_as_json("transactions", transactions)
             
             logger.info("✅ Database save completed successfully")
@@ -1321,6 +1044,57 @@ def assign_measure_safe():
             "message": f"Critical error: {str(e)}",
             "error_type": type(e).__name__
         }), 500
+    
+@app.route('/api/debug-assignment/<int:bestellnummer>', methods=['GET'])
+def debug_assignment(bestellnummer):
+    """Debug endpoint to check if a specific measure exists"""
+    try:
+        logger.info(f"🔍 DEBUG: Looking for bestellnummer {bestellnummer}")
+        
+        # Load transactions
+        transactions = get_processed_data_from_database("transactions")
+        transactions = safe_parse_json_fields(transactions)
+        
+        # Search in parked measures
+        found_in_parked = None
+        for measure in transactions.get('parked_measures', []):
+            if measure.get('bestellnummer') == bestellnummer:
+                found_in_parked = {
+                    'title': measure.get('measure_title'),
+                    'status': measure.get('status'),
+                    'category': measure.get('category'),
+                    'department': measure.get('department')
+                }
+                break
+        
+        # Search in all transactions
+        found_in_transactions = None
+        for tx in transactions.get('transactions', []):
+            if tx.get('bestellnummer') == bestellnummer:
+                found_in_transactions = {
+                    'category': tx.get('category'),
+                    'status': tx.get('status'),
+                    'department': tx.get('department')
+                }
+                break
+        
+        # Get sample of available bestellnummern
+        all_parked_bestellnummern = [m.get('bestellnummer') for m in transactions.get('parked_measures', []) if 'bestellnummer' in m]
+        
+        return jsonify({
+            "searched_bestellnummer": bestellnummer,
+            "found_in_parked_measures": found_in_parked,
+            "found_in_transactions": found_in_transactions,
+            "total_parked_measures": len(transactions.get('parked_measures', [])),
+            "total_transactions": len(transactions.get('transactions', [])),
+            "sample_parked_bestellnummern": sorted(all_parked_bestellnummern)[:20],
+            "bestellnummer_type": type(bestellnummer).__name__
+        })
+        
+    except Exception as e:
+        logger.error(f"Debug error: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 
 
 # STEP 7: CREATE A MINIMAL TEST ENDPOINT
