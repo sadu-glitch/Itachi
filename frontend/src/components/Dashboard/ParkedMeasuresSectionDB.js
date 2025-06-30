@@ -26,19 +26,14 @@ const ParkedMeasuresSection = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // ✅ ENHANCED DEBUG VERSION - Only this function, removed the duplicate
+  // ✅ FIXED: Single, proper assignMeasure function using the safe endpoint
   const assignMeasure = async (assignmentData) => {
     try {
       setLoading(true);
       setError('');
       
-      // ✅ ENHANCED DEBUG: Log exactly what we're sending
-      console.log('🔍 ASSIGNMENT DEBUG:');
+      console.log('🔍 ASSIGNMENT DEBUG (SAFE VERSION):');
       console.log('- Assignment Data:', assignmentData);
-      console.log('- Bestellnummer type:', typeof assignmentData.bestellnummer);
-      console.log('- Bestellnummer value:', assignmentData.bestellnummer);
-      console.log('- Region:', assignmentData.region);
-      console.log('- District:', assignmentData.district);
       console.log('- Base API URL:', baseApiUrl);
       
       const requestBody = {
@@ -47,11 +42,9 @@ const ParkedMeasuresSection = ({
         district: assignmentData.district.trim()
       };
       
-      console.log('- Final Request Body:', requestBody);
-      console.log('- Request Body JSON:', JSON.stringify(requestBody));
-      
-      const apiEndpoint = `${baseApiUrl}/api/assign-measure`;
+      const apiEndpoint = `${baseApiUrl}/api/assign-measure-safe`;
       console.log('- API Endpoint:', apiEndpoint);
+      console.log('- Request Body:', requestBody);
       
       const response = await fetch(apiEndpoint, {
         method: 'POST',
@@ -66,27 +59,28 @@ const ParkedMeasuresSection = ({
       console.log('- Response Status:', response.status);
       console.log('- Response OK:', response.ok);
       
-      // ✅ FIX: Handle empty response body properly
+      // Get response text first to handle empty responses
       const responseText = await response.text();
       console.log('- Raw Response Text:', responseText);
       console.log('- Response Text Length:', responseText.length);
       
       if (!response.ok) {
         console.error('❌ Response not OK');
+        
         if (responseText) {
           try {
             const errorData = JSON.parse(responseText);
             throw new Error(errorData.message || `Server error: ${response.status}`);
           } catch (parseError) {
             console.error('❌ Failed to parse error response:', parseError);
-            throw new Error(`Server error ${response.status}: ${responseText}`);
+            throw new Error(`Server error ${response.status}: ${responseText.substring(0, 200)}`);
           }
         } else {
           throw new Error(`Server error ${response.status}: Empty response from server`);
         }
       }
 
-      // ✅ FIX: Parse JSON only if response has content
+      // Handle successful response
       if (!responseText) {
         throw new Error('Empty response from server');
       }
@@ -97,7 +91,7 @@ const ParkedMeasuresSection = ({
         console.log('✅ Assignment successful:', result);
       } catch (parseError) {
         console.error('❌ Failed to parse success response:', parseError);
-        throw new Error(`Invalid JSON response: ${responseText}`);
+        throw new Error(`Invalid JSON response: ${responseText.substring(0, 200)}`);
       }
       
       return result;
