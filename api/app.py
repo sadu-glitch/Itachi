@@ -23,6 +23,7 @@ try:
         DatabaseManager,
         get_processed_data_from_database,
         save_to_database_as_json,
+        make_json_serializable,  # ← Add this
         main as process_data_main
     )
 except ImportError:

@@ -272,5 +272,6 @@ def main():
     else:
         print("\n❌ Migration failed")
 
+
 if __name__ == "__main__":
     main()
